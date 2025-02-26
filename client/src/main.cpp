@@ -76,9 +76,10 @@
  
    // Read the value of the characteristic.
    if (pRemoteCharacteristic->canRead()) {
-     String value = pRemoteCharacteristic->readValue();
-     Serial.print("The characteristic value was: ");
-     Serial.println(value.c_str());
+    std::string stdValue = pRemoteCharacteristic->readValue();
+    String value = String(stdValue.c_str());
+    Serial.print("The characteristic value was: ");
+    Serial.println(value.c_str());
    }
  
    if (pRemoteCharacteristic->canNotify()) {
