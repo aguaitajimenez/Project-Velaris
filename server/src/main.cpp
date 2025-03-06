@@ -15,28 +15,39 @@ BLEAdvertising *pAdvertising;
 
 // Global counter
 int counter = 0;
-char counter_s[10];  // Buffer to store the counter as a string
+
+// Custom Callback to Handle Disconnections
+class MyServerCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        Serial.println("Device Connected");
+    }
+
+    void onDisconnect(BLEServer* pServer) {
+        Serial.println("Device Disconnected, Restarting advertising...");
+        delay(500);
+        BLEDevice::startAdvertising();
+    }
+};
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("Starting BLE work!");
+    Serial.println("Starting BLE work");
 
     // Initialize BLE
-    BLEDevice::init("Long name works now");
+    BLEDevice::init("ESP32_BLE_2");
 
     // Create Server, Service, and Characteristic
     pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());  
     pService = pServer->createService(SERVICE_UUID);
     pCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID, 
-        // BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY
-        BLECharacteristic::PROPERTY_READ |BLECharacteristic::PROPERTY_NOTIFY
+        BLECharacteristic::PROPERTY_NOTIFY
     );
 
     // Set initial characteristic value
-    snprintf(counter_s, sizeof(counter_s), "%d", counter);
-    pCharacteristic->setValue(counter_s);
-    
+    pCharacteristic->setValue((uint8_t*)&counter, sizeof(counter));
+
     // Start the BLE Service
     pService->start();
 
@@ -48,22 +59,21 @@ void setup() {
     pAdvertising->setMinPreferred(0x12);
     BLEDevice::startAdvertising();
 
-    Serial.println("Characteristic defined! Now you can read it in your phone!");
+    Serial.println("Characteristic defined. Now you can read it in your phone.");
 }
 
 void loop() {
-    // Convert counter to a string and update BLE characteristic
-    snprintf(counter_s, sizeof(counter_s), "%d", counter);
-    pCharacteristic->setValue(counter_s);
+    // Convert counter to raw byte data
+    pCharacteristic->setValue((uint8_t*)&counter, sizeof(counter));
     pCharacteristic->notify();  // Send update over BLE
 
     // Print the value to Serial
     Serial.print("Sent value: ");
-    Serial.println(counter_s);
+    Serial.println(counter);
 
     // Increment counter
     counter++;
 
-    // Wait before sending the next update
+    // Give some time for BLE stack processing
     delay(1000);
 }
