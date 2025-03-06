@@ -7,25 +7,25 @@
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-// Global BLE objects
-BLEServer *pServer;
-BLEService *pService;
-BLECharacteristic *pCharacteristic;
-BLEAdvertising *pAdvertising;
-
-// Global counter
+BLEServer* pServer = nullptr;
+BLEService* pService = nullptr;
+BLECharacteristic* pCharacteristic = nullptr;
+BLEAdvertising* pAdvertising = nullptr;
+bool deviceConnected = false;
 int counter = 0;
 
-// Custom Callback to Handle Disconnections
+// Custom Callback to Handle Connections & Disconnections
 class MyServerCallbacks : public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
+    void onConnect(BLEServer* pServer) override {
         Serial.println("Device Connected");
+        deviceConnected = true;
     }
 
-    void onDisconnect(BLEServer* pServer) {
-        Serial.println("Device Disconnected, Restarting advertising...");
-        delay(500);
-        BLEDevice::startAdvertising();
+    void onDisconnect(BLEServer* pServer) override {
+        Serial.println("Device Disconnected. Restarting advertising...");
+        deviceConnected = false;
+        delay(1000);  // Small delay before restarting advertising
+        pServer->startAdvertising();
     }
 };
 
@@ -33,47 +33,37 @@ void setup() {
     Serial.begin(115200);
     Serial.println("Starting BLE work");
 
-    // Initialize BLE
     BLEDevice::init("ESP32_BLE_2");
 
-    // Create Server, Service, and Characteristic
     pServer = BLEDevice::createServer();
-    pServer->setCallbacks(new MyServerCallbacks());  
+    pServer->setCallbacks(new MyServerCallbacks());
+
     pService = pServer->createService(SERVICE_UUID);
     pCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID, 
         BLECharacteristic::PROPERTY_NOTIFY
     );
 
-    // Set initial characteristic value
-    pCharacteristic->setValue((uint8_t*)&counter, sizeof(counter));
-
-    // Start the BLE Service
     pService->start();
-
-    // Start Advertising
-    pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising = pServer->getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
-    pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06);
-    pAdvertising->setMinPreferred(0x12);
-    BLEDevice::startAdvertising();
+    pAdvertising->start();
 
-    Serial.println("Characteristic defined. Now you can read it in your phone.");
+    Serial.println("BLE Server Ready. Waiting for connections...");
 }
 
 void loop() {
-    // Convert counter to raw byte data
-    pCharacteristic->setValue((uint8_t*)&counter, sizeof(counter));
-    pCharacteristic->notify();  // Send update over BLE
+    if (deviceConnected) { // Only notify if a client is connected
+        pCharacteristic->setValue((uint8_t*)&counter, sizeof(counter));
+        pCharacteristic->notify();  // Send update over BLE
 
-    // Print the value to Serial
-    Serial.print("Sent value: ");
-    Serial.println(counter);
+        Serial.print("Sent value: ");
+        Serial.println(counter);
 
-    // Increment counter
-    counter++;
+        counter++; // Increment counter
+    } else {
+        Serial.println("No client connected, skipping notification.");
+    }
 
-    // Give some time for BLE stack processing
     delay(1000);
 }
