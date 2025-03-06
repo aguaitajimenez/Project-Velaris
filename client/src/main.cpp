@@ -12,6 +12,13 @@ static BLERemoteCharacteristic* pRemoteCharacteristic;
 static BLEAdvertisedDevice* myDevice;
 static BLEClient* pClient; // Global BLEClient pointer
 
+int rssi[32];
+int rssi_i = 0;
+double rssi_avg = 0;
+
+// Flag to indicate when to read RSSI
+static boolean readRSSI = false;
+
 // Notification Callback Function
 static void notifyCallback(
   BLERemoteCharacteristic* pBLERemoteCharacteristic,
@@ -19,24 +26,18 @@ static void notifyCallback(
   size_t length,
   bool isNotify) {
   
-  Serial.print("Notification Received - Data Length: ");
-  Serial.println(length);
+  // Serial.print("Notification Received - Data Length: ");
+  // Serial.println(length);
 
   // Convert received bytes to an integer (Counter Value)
-  int counter = atoi((char*)pData);
+  int counter;
+  memcpy(&counter, pData, sizeof(counter));
 
-  Serial.print("Counter Value from Server: ");
-  Serial.println(counter);
+  // Serial.print("Counter Value from Server: ");
+  // Serial.println(counter);
 
-  // Retrieve and print the RSSI value
-  if (pClient->isConnected()) {
-    int rssi = pClient->getRssi();
-    Serial.print("RSSI of Received Packet: ");
-    Serial.print(rssi);
-    Serial.println(" dBm");
-  } else {
-    Serial.println("Client not connected; unable to retrieve RSSI.");
-  }
+  // Set flag to read RSSI in the main loop
+  // readRSSI = true;
 }
 
 class MyClientCallback : public BLEClientCallbacks {
@@ -97,6 +98,8 @@ bool connectToServer() {
   if (pRemoteCharacteristic->canNotify()) {
     pRemoteCharacteristic->registerForNotify(notifyCallback);
     Serial.println("Notifications Enabled");
+  } else {
+    Serial.println("Failed to enable notifications");
   }
 
   connected = true;
@@ -110,6 +113,8 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
     Serial.println(advertisedDevice.toString().c_str());
 
     if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(serviceUUID)) {
+      Serial.print("Found BLE Device with service UUID: ");
+      Serial.println(advertisedDevice.toString().c_str());
       BLEDevice::getScan()->stop();
       myDevice = new BLEAdvertisedDevice(advertisedDevice);
       doConnect = true;
@@ -130,8 +135,10 @@ void setup() {
   pBLEScan->setInterval(1349);
   pBLEScan->setWindow(449);
   pBLEScan->setActiveScan(true);
-  pBLEScan->start(5, false);
+  pBLEScan->start(5, false); // Scan for 5 seconds
 }
+
+
 
 void loop() {
   // Attempt connection if flagged
@@ -144,10 +151,34 @@ void loop() {
     doConnect = false;
   }
 
+  // Read RSSI if flag is set
+  if (connected) {
+    rssi[rssi_i] = pClient->getRssi();
+    rssi_i < 31 ? rssi_i++ : rssi_i = 0;
+
+    // Calculate average RSSI
+    rssi_avg = 0.0;
+    for (int i = 0; i < 32; i++) {
+      rssi_avg += (double)rssi[i];
+    }
+    rssi_avg /= 32.0;
+
+    Serial.print("RSSI_avg of Received Packet: ");
+    Serial.print(rssi_avg);
+    Serial.print(" dBm");
+    Serial.print(" -- ");
+    double alpha = 1.2;
+    double d = pow(10, (-60.0 - rssi_avg) / (10.0 * alpha));
+    // readRSSI = false; 
+    Serial.print("Distance to Server: ");
+    Serial.print(d);
+    Serial.println(" meters");
+  }
+
   // Restart scanning if disconnected
   if (!connected && doScan) {
     BLEDevice::getScan()->start(0);
   }
 
-  delay(1000);
+  delay(50);
 }
