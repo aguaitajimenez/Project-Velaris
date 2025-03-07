@@ -167,8 +167,15 @@ void loop() {
     Serial.print(rssi_avg);
     Serial.print(" dBm");
     Serial.print(" -- ");
-    double alpha = 1.2;
-    double d = pow(10, (-60.0 - rssi_avg) / (10.0 * alpha));
+    // double alpha = 1.2;
+    // double d = pow(10, (-60.0 - rssi_avg) / (10.0 * alpha));
+
+    // ITU-R P.1238-7 model
+    double ptx = -8.0;  // Power transmitted in dBm
+    double f = 2.4e9;  // Frequency in Hz
+    double N = 28.0;  // Coefficient for 2.4 GHz in residential area
+    double d = pow(10, ((ptx - rssi_avg - 20 * log10(f) + 28) / N));  // Distance in meters
+
     // readRSSI = false; 
     Serial.print("Distance to Server: ");
     Serial.print(d);
