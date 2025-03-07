@@ -135,7 +135,7 @@ void setup() {
   pBLEScan->setInterval(1349);
   pBLEScan->setWindow(449);
   pBLEScan->setActiveScan(true);
-  pBLEScan->start(5, false); // Scan for 5 seconds
+  pBLEScan->start(60, false); // Scan for 5 seconds
 }
 
 
