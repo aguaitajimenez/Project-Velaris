@@ -12,7 +12,8 @@ int counter = 0;
 
 void setup() {
     Serial.begin(115200);
-    Wire.begin();
+    // Wire.begin();
+    sensors_begin(Wire);
     delay(1000); // give peripherals some time
     Serial.println("Starting BLE Server with Temperature Service");
 
@@ -53,15 +54,15 @@ void setup() {
     pAdvertising->start();
 
     Serial.println("BLE Server with Temperature Service Started");
-
-    xTaskCreate(
-        task_sensors,
-        "task_sensors",     // Task name
-        2048,               // stack size
-        NULL,               // Task parameters
-        1,                  // Task priority
-        NULL                // Task handler
-    );
+    // xTaskCreate(
+    //     task_sensors,
+    //     "task_sensors",     // Task name
+    //     2048,               // stack size
+    //     NULL,               // Task parameters
+    //     1,                  // Task priority
+    //     NULL                // Task handler
+    // );
+    sensors_run();
 
 }
 

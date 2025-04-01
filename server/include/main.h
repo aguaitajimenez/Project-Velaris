@@ -8,12 +8,15 @@
 // Date: YYYY-MM-DD
 // -----------------------------------------------------------------------------
 
+#define CONFIG_DISABLE_HAL_LOCKS 0
+
 #include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEUtils.h>
-#include <BLEServer.h>
+#include <BLEServer.h>  
 #include <BLEAdvertising.h>
 #include "sensors.h"
+#include "Wire.h"
 
 // -----------------------------------------------------------------------------
 // Constants and Macros

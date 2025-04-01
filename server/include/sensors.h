@@ -9,15 +9,17 @@
 // -----------------------------------------------------------------------------
 
 #include <Arduino.h>  // Include core Arduino definitions
-#include <Wire.h>
 #include "main.h"
 #include "temperature.h"
+#include "MAX30105.h"
+#include "heartRate.h"
 
 // -----------------------------------------------------------------------------
 // Constants and Macros
 // -----------------------------------------------------------------------------
 
-#define LED_PIN 13 // Built-in LED on most Arduino boards
+#define ACTIVITY_PIN    13 // Built-in LED on most Arduino boards
+#define PULSE_PIN       12
 #define TMP117_ADDRESS 0x48 // Default I2C address for TMP117
 
 // -----------------------------------------------------------------------------
@@ -33,8 +35,14 @@
 // -----------------------------------------------------------------------------
 
 
-float readTemperature();
+
+void sensors_begin(TwoWire &wirePort); 
+void sensors_run();
 void task_sensors(void * parameters);
+void task_heartmonitor(void * parameters);        
+void task_heartout(void *parameters);
+
+
 
 // -----------------------------------------------------------------------------
 // Optional Class Definition
