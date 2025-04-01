@@ -114,8 +114,8 @@ void task_heartmonitor(void *parameters)
             }
         }
 
-        Serial.print("IR:");
-        Serial.print(irValue);
+        // Serial.print("IR:");
+        // Serial.print(irValue);
         Serial.print(",BPM:");
         Serial.print(beatsPerMinute);
         Serial.print(",AvgBPM:");
