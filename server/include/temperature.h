@@ -8,10 +8,8 @@
 // Date: YYYY-MM-DD
 // -----------------------------------------------------------------------------
 
-#include <Arduino.h>  // Include core Arduino definitions
+#include "Arduino.h"
 #include <Wire.h>
-#include "main.h"
-#include "temperature.h"
 
 // -----------------------------------------------------------------------------
 // Constants and Macros
@@ -32,9 +30,7 @@
 // Function Declarations
 // -----------------------------------------------------------------------------
 
-
 float readTemperature();
-void task_sensors(void * parameters);
 
 // -----------------------------------------------------------------------------
 // Optional Class Definition

@@ -1,5 +1,5 @@
-#ifndef SENSORS_H
-#define SENSORS_H
+#ifndef HEARTRATE_H
+#define HEARTRATE_H
 
 // -----------------------------------------------------------------------------
 // File: SENSORS_H.h
@@ -11,7 +11,6 @@
 #include <Arduino.h>  // Include core Arduino definitions
 #include <Wire.h>
 #include "main.h"
-#include "temperature.h"
 
 // -----------------------------------------------------------------------------
 // Constants and Macros
