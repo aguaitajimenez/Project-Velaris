@@ -1,69 +1,73 @@
-#include <Arduino.h>
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEServer.h>
+#include "main.h"
 
-// UUIDs for BLE Service and Characteristic
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+// BLE Server and Advertising objects
+BLEServer* pServer;
+BLEAdvertising* pAdvertising;
 
-BLEServer* pServer = nullptr;
-BLEService* pService = nullptr;
-BLECharacteristic* pCharacteristic = nullptr;
-BLEAdvertising* pAdvertising = nullptr;
-bool deviceConnected = false;
+// BLE Service and Characteristic
+BLEService* temperatureService;
+BLECharacteristic* temperatureCharacteristic;
+
 int counter = 0;
-
-// Custom Callback to Handle Connections & Disconnections
-class MyServerCallbacks : public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) override {
-        Serial.println("Device Connected");
-        deviceConnected = true;
-    }
-
-    void onDisconnect(BLEServer* pServer) override {
-        Serial.println("Device Disconnected. Restarting advertising...");
-        deviceConnected = false;
-        delay(1000);  // Small delay before restarting advertising
-        pServer->startAdvertising();
-    }
-};
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("Starting BLE work");
+    Wire.begin();
+    delay(1000); // give peripherals some time
+    Serial.println("Starting BLE Server with Temperature Service");
 
-    BLEDevice::init("ESP32_BLE_2");
-
+    // Initialize BLE
+    BLEDevice::init(DEVICE_NAME);
     pServer = BLEDevice::createServer();
-    pServer->setCallbacks(new MyServerCallbacks());
+    pAdvertising = BLEDevice::getAdvertising();
 
-    pService = pServer->createService(SERVICE_UUID);
-    pCharacteristic = pService->createCharacteristic(
-        CHARACTERISTIC_UUID, 
-        BLECharacteristic::PROPERTY_NOTIFY
+    // Create and start the temperature service
+    temperatureService = pServer->createService(TEMPERATURE_SERVICE_UUID);
+
+    // Create and set up temperature characteristic with descriptor
+    temperatureCharacteristic = temperatureService->createCharacteristic(
+        CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
     );
+    // BLEDescriptor* temperatureDescriptor = new BLEDescriptor(DESCRIPTOR_UUID);
+    // temperatureDescriptor->setValue("Temperature Data");
+    // temperatureCharacteristic->addDescriptor(temperatureDescriptor);
+    temperatureCharacteristic->setValue("Hello World - Temperature");
 
-    pService->start();
-    pAdvertising = pServer->getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID);
+    // Start the service
+    temperatureService->start();
+
+    // Add service to advertising
+    pAdvertising->addServiceUUID(TEMPERATURE_SERVICE_UUID);
+
+    // Set up advertisement data
+    BLEAdvertisementData advertisementData;
+    advertisementData.setName(DEVICE_NAME);
+    advertisementData.setManufacturerData("ESP32 BLE");
+    pAdvertising->setAdvertisementData(advertisementData);
+
+    // Configure advertisement parameters
+    pAdvertising->setMinInterval(1600); // 1 second
+    pAdvertising->setMaxInterval(3200); // 2 seconds
+    pAdvertising->setScanResponse(false);
     pAdvertising->start();
 
-    Serial.println("BLE Server Ready. Waiting for connections...");
+    Serial.println("BLE Server with Temperature Service Started");
+
+    xTaskCreate(
+        task_sensors,
+        "task_sensors",     // Task name
+        2048,               // stack size
+        NULL,               // Task parameters
+        1,                  // Task priority
+        NULL                // Task handler
+    );
+
 }
 
 void loop() {
-    if (deviceConnected) { // Only notify if a client is connected
-        pCharacteristic->setValue((uint8_t*)&counter, sizeof(counter));
-        pCharacteristic->notify();  // Send update over BLE
-
-        Serial.print("Sent value: ");
-        Serial.println(counter);
-
-        counter++; // Increment counter
-    } else {
-        Serial.println("No client connected, skipping notification.");
-    }
-
-    delay(1000);
+    // Serial.print("Program execution counter: ");
+    // Serial.println(counter);
+    // counter++;
+    // delay(1000); // Delay to avoid unnecessary advertisement flooding
 }
