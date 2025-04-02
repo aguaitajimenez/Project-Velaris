@@ -711,7 +711,7 @@ bool MAX30105::safeCheck(uint8_t maxTimeToCheck)
 	if(check() == true) //We found new data!
 	  return(true);
 
-    vTaskDelay(10 / portTICK_PERIOD_MS);
+    vTaskDelay(20 / portTICK_PERIOD_MS);
   }
 }
 

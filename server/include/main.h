@@ -25,8 +25,15 @@
 #define DEVICE_NAME "ESP32_Advertiser"
 
 // UUIDs for the temperature service
-#define TEMPERATURE_SERVICE_UUID "eab293ea-ab75-4fa3-a21f-66a937c57020"
-#define CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc0d2" // Updated to standard Temperature Measurement UUID
+#define TEMPERATURE_SERVICE_UUID "eab293ea-ab75-4fa3-a21f-66a937c57000"
+#define HEARTRATE_SERVICE_UUID "eab293ea-ab75-4fa3-a21f-66a937c57001"
+#define ACCELERATION_SERVICE_UUID "eab293ea-ab75-4fa3-a21f-66a937c57002"
+
+#define TEMPERATURE_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc000"
+#define HEARTRATE_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc001"
+#define ACCX_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc002"
+#define ACCY_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc003"
+#define ACCZ_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc004"
 // #define DESCRIPTOR_UUID "2901"     // Descriptor UUID
 
 // -----------------------------------------------------------------------------
@@ -44,7 +51,14 @@ extern BLEAdvertising* pAdvertising;
 
 // BLE Service and Characteristic
 extern BLEService* temperatureService;
+extern BLEService* heartRateService;
+extern BLEService* acceletationService;
+
 extern BLECharacteristic* temperatureCharacteristic;
+extern BLECharacteristic* heartRateCharacteristic;
+extern BLECharacteristic* accXCharacteristic;
+extern BLECharacteristic* accYCharacteristic;
+extern BLECharacteristic* accZCharacteristic;
 
 // -----------------------------------------------------------------------------
 // Function Declarations
@@ -58,14 +72,5 @@ void printSensorStatus();
 // Optional Class Definition
 // -----------------------------------------------------------------------------
 
-class ExampleClass {
-public:
-    ExampleClass();
-    void begin();
-    float getValue();
-
-private:
-    int _internalState;
-};
-
-#endif // YOUR_HEADER_FILENAME_H
+#endif // MAIN_H
+    

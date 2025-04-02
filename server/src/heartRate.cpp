@@ -93,8 +93,8 @@ bool checkForBeat(int32_t sample)
   IR_Average_Estimated = averageDCEstimator(&ir_avg_reg, sample);
   IR_AC_Signal_Current = lowPassFIRFilter(sample - IR_Average_Estimated);
 
-  Serial.print("IR_AC_Signal_Current:");
-  Serial.print(IR_AC_Signal_Current);
+  // Serial.print("IR_AC_Signal_Current:");
+  // Serial.print(IR_AC_Signal_Current);
 
   //  Detect positive zero crossing (rising edge)
   if ((IR_AC_Signal_Previous < 0) & (IR_AC_Signal_Current >= 0))
@@ -108,7 +108,7 @@ bool checkForBeat(int32_t sample)
     IR_AC_Signal_max = 0;
 
     //if ((IR_AC_Max - IR_AC_Min) > 100 & (IR_AC_Max - IR_AC_Min) < 1000)
-    if ((IR_AC_Max - IR_AC_Min) > 10 & (IR_AC_Max - IR_AC_Min) < 2000)
+    if ((IR_AC_Max - IR_AC_Min) > 10 & (IR_AC_Max - IR_AC_Min) < 3000)
     {
       //Heart beat!!!
       beatDetected = true;

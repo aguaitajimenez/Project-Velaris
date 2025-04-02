@@ -6,7 +6,14 @@ BLEAdvertising* pAdvertising;
 
 // BLE Service and Characteristic
 BLEService* temperatureService;
+BLEService* heartRateService;
+BLEService* acceletationService;
+
 BLECharacteristic* temperatureCharacteristic;
+BLECharacteristic* heartRateCharacteristic;
+BLECharacteristic* accXCharacteristic;
+BLECharacteristic* accYCharacteristic;
+BLECharacteristic* accZCharacteristic;
 
 int counter = 0;
 
@@ -24,22 +31,50 @@ void setup() {
 
     // Create and start the temperature service
     temperatureService = pServer->createService(TEMPERATURE_SERVICE_UUID);
+    heartRateService = pServer->createService(HEARTRATE_SERVICE_UUID);
+    acceletationService = pServer->createService(ACCELERATION_SERVICE_UUID);
+
 
     // Create and set up temperature characteristic with descriptor
     temperatureCharacteristic = temperatureService->createCharacteristic(
-        CHARACTERISTIC_UUID,
+        TEMPERATURE_CHARACTERISTIC_UUID,
         BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
     );
-    // BLEDescriptor* temperatureDescriptor = new BLEDescriptor(DESCRIPTOR_UUID);
-    // temperatureDescriptor->setValue("Temperature Data");
-    // temperatureCharacteristic->addDescriptor(temperatureDescriptor);
+
+    heartRateCharacteristic = heartRateService->createCharacteristic(
+        HEARTRATE_CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+
+
+    accXCharacteristic = acceletationService->createCharacteristic(
+        ACCX_CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+    accYCharacteristic = acceletationService->createCharacteristic(
+        ACCY_CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+    accZCharacteristic = acceletationService->createCharacteristic(
+        ACCX_CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+
     temperatureCharacteristic->setValue("Hello World - Temperature");
 
     // Start the service
     temperatureService->start();
+    heartRateService->start();
+    acceletationService->start();
 
     // Add service to advertising
     pAdvertising->addServiceUUID(TEMPERATURE_SERVICE_UUID);
+    pAdvertising->addServiceUUID(HEARTRATE_SERVICE_UUID);
+    pAdvertising->addServiceUUID(ACCELERATION_SERVICE_UUID);
 
     // Set up advertisement data
     BLEAdvertisementData advertisementData;
