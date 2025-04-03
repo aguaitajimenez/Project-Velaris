@@ -1,36 +1,144 @@
 #include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEUtils.h>
+#include <BLEClient.h>
 #include <BLEScan.h>
 
-#define SCAN_TIME 5 // Duration of BLE scan in seconds
+#define CONNECTED_LED_PIN 13
+#define SERVER_NAME "ESP32_Advertiser"
 
-BLEScan* pBLEScan;
+// UUID del servicio y características
+static BLEUUID serviceUUID("eab293ea-ab75-4fa3-a21f-66a937c57000");
+static BLEUUID tempUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc000");
+static BLEUUID hrUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc001");
+static BLEUUID accXUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc002");
+static BLEUUID accYUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc003");
+static BLEUUID accZUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc004");
 
+// Flags y punteros
+static boolean doConnect = false;
+static boolean connected = false;
+static boolean doScan = false;
+static BLEAdvertisedDevice* myDevice;
+
+BLERemoteCharacteristic* tempChar;
+BLERemoteCharacteristic* hrChar;
+BLERemoteCharacteristic* accXChar;
+BLERemoteCharacteristic* accYChar;
+BLERemoteCharacteristic* accZChar;
+
+// Callback de notificación
+void notifyCallback(BLERemoteCharacteristic* pChar, uint8_t* pData, size_t length, bool isNotify) {
+  String value = String((char*)pData, length);
+  Serial.print("Notify from ");
+  Serial.print(pChar->getUUID().toString().c_str());
+  Serial.print(": ");
+  Serial.println(value);
+}
+
+class MyClientCallback : public BLEClientCallbacks {
+  void onConnect(BLEClient* pClient) override {
+    digitalWrite(CONNECTED_LED_PIN, HIGH);
+    Serial.println("Connected to BLE server.");
+  }
+
+  void onDisconnect(BLEClient* pClient) override {
+    digitalWrite(CONNECTED_LED_PIN, LOW);
+    Serial.println("Disconnected from BLE server.");
+    connected = false;
+    doScan = true;
+  }
+};
+
+bool connectToServer() {
+  Serial.print("Connecting to ");
+  Serial.println(myDevice->getAddress().toString().c_str());
+
+  if (myDevice->haveName()) {
+    Serial.print("Device name: ");
+    Serial.println(myDevice->getName().c_str());
+  }
+
+  BLEClient* pClient = BLEDevice::createClient();
+  pClient->setClientCallbacks(new MyClientCallback());
+  pClient->connect(myDevice);
+  pClient->setMTU(517);
+
+  BLERemoteService* pService = pClient->getService(serviceUUID);
+  if (!pService) {
+    Serial.println("Failed to find service.");
+    pClient->disconnect();
+    return false;
+  }
+
+  tempChar = pService->getCharacteristic(tempUUID);
+  hrChar   = pService->getCharacteristic(hrUUID);
+  accXChar = pService->getCharacteristic(accXUUID);
+  accYChar = pService->getCharacteristic(accYUUID);
+  accZChar = pService->getCharacteristic(accZUUID);
+
+  if (tempChar && tempChar->canNotify()) tempChar->registerForNotify(notifyCallback);
+  if (hrChar   && hrChar->canNotify())   hrChar->registerForNotify(notifyCallback);
+  if (accXChar && accXChar->canNotify()) accXChar->registerForNotify(notifyCallback);
+  if (accYChar && accYChar->canNotify()) accYChar->registerForNotify(notifyCallback);
+  if (accZChar && accZChar->canNotify()) accZChar->registerForNotify(notifyCallback);
+
+  connected = true;
+  return true;
+}
+
+// Escaneo BLE
 class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
-    void onResult(BLEAdvertisedDevice advertisedDevice) override {
-        Serial.print("Device found: ");
-        Serial.println(advertisedDevice.toString().c_str());
+  void onResult(BLEAdvertisedDevice advertisedDevice) override {
+    Serial.print("Device found: ");
+    Serial.print(advertisedDevice.getAddress().toString().c_str());
+
+    if (advertisedDevice.haveName()) {
+      Serial.print(" Name: ");
+      Serial.print(advertisedDevice.getName().c_str());
     }
+
+    Serial.print(" RSSI: ");
+    Serial.println(advertisedDevice.getRSSI());
+
+    if (advertisedDevice.haveName() && advertisedDevice.getName() == SERVER_NAME) {
+      BLEDevice::getScan()->stop();
+      myDevice = new BLEAdvertisedDevice(advertisedDevice);
+      doConnect = true;
+    }
+  }
 };
 
 void setup() {
-    Serial.begin(115200);
-    Serial.println("Starting BLE Scanner");
+  Serial.begin(115200);
+  pinMode(CONNECTED_LED_PIN, OUTPUT);
+  digitalWrite(CONNECTED_LED_PIN, LOW);
 
-    BLEDevice::init("");
-    pBLEScan = BLEDevice::getScan();
-    pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-    pBLEScan->setActiveScan(true); // Active scanning to request scan response data
-    pBLEScan->setInterval(100);
-    pBLEScan->setWindow(99);
+  Serial.println("Starting BLE Client...");
+  BLEDevice::init("");
+
+  BLEScan* pScan = BLEDevice::getScan();
+  pScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pScan->setInterval(1349);
+  pScan->setWindow(449);
+  pScan->setActiveScan(true);
+  pScan->start(5, false);
 }
 
 void loop() {
-    Serial.println("Scanning for BLE devices...");
-    BLEScanResults scanResults = pBLEScan->start(SCAN_TIME, false);
-    Serial.print("Devices found: ");
-    Serial.println(scanResults.getCount());
-    pBLEScan->clearResults(); // Free memory from scan results
-    delay(5000); // Wait before scanning again
+  if (doConnect) {
+    if (connectToServer()) {
+      Serial.println("Connected and subscribed to notifications.");
+    } else {
+      Serial.println("Connection failed.");
+    }
+    doConnect = false;
+  }
+
+  if (!connected && doScan) {
+    BLEDevice::getScan()->start(0); // restart scan
+    doScan = false;
+  }
+
+  delay(1000);
 }
