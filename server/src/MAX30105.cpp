@@ -541,8 +541,10 @@ uint32_t MAX30105::getRed(void)
 uint32_t MAX30105::getIR(void)
 {
   //Check the sensor for new data for 250ms
-  if(safeCheck(250))
+  if(safeCheck(250)){
+    
     return (sense.IR[sense.head]);
+  }
   else
     return(0); //Sensor failed to find new data
 }
@@ -707,12 +709,12 @@ bool MAX30105::safeCheck(uint8_t maxTimeToCheck)
   
   while(1){
 	if(millis() - markTime > maxTimeToCheck) return(false);
-
+  
 	if(check() == true) //We found new data!
 	  return(true);
-
-    vTaskDelay(20 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
   }
+
 }
 
 //Given a register, read it, mask it, and then set the thing

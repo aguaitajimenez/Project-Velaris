@@ -15,7 +15,9 @@
 #include "MAX30105.h"
 #include "heartRate.h"
 #include "spo2_algorithm.h"
-#include "BNO08x.h"
+#include "Adafruit_BNO08x_RVC.h"
+
+// #include "BNO08x.h"
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
@@ -32,15 +34,17 @@
 #define TMP117_ADDRESS 0x48 // Default I2C address for TMP117
 
 // BLE Service and Characteristic
-extern BLEService* temperatureService;
-extern BLEService* heartRateService;
-extern BLEService* acceletationService;
+extern BLEService* applicationService;
+// extern BLEService* heartRateService;
+// extern BLEService* acceletationService;
 
 extern BLECharacteristic* temperatureCharacteristic;
 extern BLECharacteristic* heartRateCharacteristic;
 extern BLECharacteristic* accXCharacteristic;
 extern BLECharacteristic* accYCharacteristic;
 extern BLECharacteristic* accZCharacteristic;
+
+extern bool deviceConnected;
 
 // TFT display pins
 // #define TFT_CS        7
@@ -68,7 +72,7 @@ void task_heartmonitor(void * parameters);
 void task_heartout(void *parameters);
 void task_heartAndO2monitor(void *parameters);
 void task_accelerometer(void *parameters);
-void task_uart_output(void * parameters);
+void task_data_output(void * parameters);
 void task_tft(void *parameters);
 
 // -----------------------------------------------------------------------------

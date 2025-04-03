@@ -25,7 +25,7 @@
 #define DEVICE_NAME "ESP32_Advertiser"
 
 // UUIDs for the temperature service
-#define TEMPERATURE_SERVICE_UUID "eab293ea-ab75-4fa3-a21f-66a937c57000"
+#define APPLICATION_SERVICE_UUID "eab293ea-ab75-4fa3-a21f-66a937c57000"
 #define HEARTRATE_SERVICE_UUID "eab293ea-ab75-4fa3-a21f-66a937c57001"
 #define ACCELERATION_SERVICE_UUID "eab293ea-ab75-4fa3-a21f-66a937c57002"
 
@@ -50,9 +50,9 @@ extern BLEServer* pServer;
 extern BLEAdvertising* pAdvertising;
 
 // BLE Service and Characteristic
-extern BLEService* temperatureService;
-extern BLEService* heartRateService;
-extern BLEService* acceletationService;
+extern BLEService* applicationService;
+// extern BLEService* heartRateService;
+// extern BLEService* acceletationService;
 
 extern BLECharacteristic* temperatureCharacteristic;
 extern BLECharacteristic* heartRateCharacteristic;
