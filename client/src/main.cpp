@@ -18,9 +18,10 @@ static BLEUUID accZUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc004");
 // Flags y punteros
 static boolean doConnect = false;
 static boolean connected = false;
-static boolean doScan = false;
+static boolean doScan = true;
 static BLEAdvertisedDevice* myDevice;
 
+BLEClient* pClient = nullptr;
 BLERemoteCharacteristic* tempChar;
 BLERemoteCharacteristic* hrChar;
 BLERemoteCharacteristic* accXChar;
@@ -29,11 +30,12 @@ BLERemoteCharacteristic* accZChar;
 
 // Callback de notificación
 void notifyCallback(BLERemoteCharacteristic* pChar, uint8_t* pData, size_t length, bool isNotify) {
-  String value = String((char*)pData, length);
-  Serial.print("Notify from ");
-  Serial.print(pChar->getUUID().toString().c_str());
-  Serial.print(": ");
-  Serial.println(value);
+    String value = String((char*)pData, length);
+    Serial.print("Notify from ");
+    Serial.print(pChar->getUUID().toString().c_str());
+    Serial.print(": ");
+    Serial.print(value);
+    Serial.println();
 }
 
 class MyClientCallback : public BLEClientCallbacks {
@@ -59,10 +61,9 @@ bool connectToServer() {
     Serial.println(myDevice->getName().c_str());
   }
 
-  BLEClient* pClient = BLEDevice::createClient();
+  pClient = BLEDevice::createClient();
   pClient->setClientCallbacks(new MyClientCallback());
   pClient->connect(myDevice);
-  pClient->setMTU(517);
 
   BLERemoteService* pService = pClient->getService(serviceUUID);
   if (!pService) {
@@ -122,7 +123,6 @@ void setup() {
   pScan->setInterval(1349);
   pScan->setWindow(449);
   pScan->setActiveScan(true);
-  pScan->start(5, false);
 }
 
 void loop() {
@@ -138,6 +138,12 @@ void loop() {
   if (!connected && doScan) {
     BLEDevice::getScan()->start(0); // restart scan
     doScan = false;
+  }
+
+  if(connected){
+    int rssi = pClient->getRssi();
+        Serial.print(" RSSI: ");
+        Serial.println(rssi);
   }
 
   delay(1000);
