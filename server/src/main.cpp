@@ -15,6 +15,8 @@ BLECharacteristic* heartRateCharacteristic;
 BLECharacteristic* accXCharacteristic;
 BLECharacteristic* accYCharacteristic;
 BLECharacteristic* accZCharacteristic;
+BLECharacteristic* battVCharacteristic;
+BLECharacteristic* battPCharacteristic;
 
 bool deviceConnected = false;
 int counter = 0;
@@ -22,6 +24,8 @@ int counter = 0;
 class MyServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* pServer){
         deviceConnected = true;
+        delay(100);
+        pAdvertising->start();
     }
 
     void onDisconnect(BLEServer* pServer){
@@ -80,6 +84,16 @@ void setup() {
         BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
     );
 
+    battVCharacteristic = applicationService->createCharacteristic(
+        BATTV_CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+    battPCharacteristic = applicationService->createCharacteristic(
+        BATTP_CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+    );
+
 
 
     temperatureCharacteristic->setValue("INITIALSTRING");
@@ -87,6 +101,8 @@ void setup() {
     accXCharacteristic->setValue("INITIALSTRING");
     accYCharacteristic->setValue("INITIALSTRING");
     accZCharacteristic->setValue("INITIALSTRING");
+    battVCharacteristic->setValue("INITIALSTRING");
+    battPCharacteristic->setValue("INITIALSTRING");
 
     // Start the service
     applicationService->start();
@@ -100,6 +116,7 @@ void setup() {
     advertisementData.setName(DEVICE_NAME);
     advertisementData.setManufacturerData("ESP32 BLE");
     pAdvertising->setAdvertisementData(advertisementData);
+    pAdvertising->addServiceUUID(APPLICATION_SERVICE_UUID);
 
     // Configure advertisement parameters
     pAdvertising->setMinInterval(1600); // 1 second
@@ -108,14 +125,6 @@ void setup() {
     pAdvertising->start();
 
     Serial.println("BLE Server with Temperature Service Started");
-    // xTaskCreate(
-    //     task_sensors,
-    //     "task_sensors",     // Task name
-    //     2048,               // stack size
-    //     NULL,               // Task parameters
-    //     1,                  // Task priority
-    //     NULL                // Task handler
-    // );
     sensors_run();
 
 }

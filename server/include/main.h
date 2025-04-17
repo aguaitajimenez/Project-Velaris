@@ -34,6 +34,8 @@
 #define ACCX_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc002"
 #define ACCY_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc003"
 #define ACCZ_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc004"
+#define BATTV_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc005"
+#define BATTP_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc006"
 // #define DESCRIPTOR_UUID "2901"     // Descriptor UUID
 
 // -----------------------------------------------------------------------------

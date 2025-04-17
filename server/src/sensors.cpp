@@ -1,6 +1,6 @@
 #include "sensors.h"
 
-#define TEMP_DELAY_MS 1000
+#define TEMP_DELAY_MS 500
 #define TEMP_DELAY_TICKS (TEMP_DELAY_MS / portTICK_PERIOD_MS)
 
 TwoWire *wirePort;
@@ -20,6 +20,11 @@ int beatAvg;
 long irValue;
 bool beat_f = 0;
 
+#define MAX17048_I2CADDR_DEFAULT 0x36
+#define VBATT_ADDRESS 0x02
+#define PBATT_ADDRESS 0x04
+float vbatt = 0;
+float pbatt = 0;
 // uint32_t irBuffer[100];     //infrared LED sensor data
 // uint32_t redBuffer[100];    //red LED sensor data
 
@@ -29,22 +34,19 @@ bool beat_f = 0;
 // int32_t heartRate; //heart rate value
 // int8_t validHeartRate; //indicator to show if the heart rate calculation is valid
 
-
 Adafruit_BNO08x_RVC rvc = Adafruit_BNO08x_RVC();
 // sh2_SensorValue_t bnoValues;
 float acc_x = 0;
 float acc_y = 0;
 float acc_z = 0;
 
-
-void sensors_begin(TwoWire &wire){
-    
-
+void sensors_begin(TwoWire &wire)
+{
 
     pinMode(TFT_I2C_POWER, OUTPUT);
-    digitalWrite(TFT_I2C_POWER, HIGH);
+    digitalWrite(TFT_I2C_POWER, LOW);
     delay(50);
-    
+
     // Configure I2C
     wirePort = &wire;
     wirePort->begin();
@@ -58,21 +60,21 @@ void sensors_begin(TwoWire &wire){
 
     // Configure HR sensor
     particleSensor.begin(*wirePort, I2C_SPEED_FAST);
-    particleSensor.setup(0x1F, 4, 3, 200, 411, 4096);                    // Configure sensor with default settings
-    particleSensor.setPulseAmplitudeRed(0x0A); // Turn Red LED to low to indicate sensor is running
-    particleSensor.setPulseAmplitudeGreen(0);  // Turn off Green LED
+    particleSensor.setup(0x1F, 4, 3, 200, 411, 4096); // Configure sensor with default settings
+    particleSensor.setPulseAmplitudeRed(0x0A);        // Turn Red LED to low to indicate sensor is running
+    particleSensor.setPulseAmplitudeGreen(0);         // Turn off Green LED
     delay(10);
 
-    if (!rvc.begin(&Serial2)) { // connect to the sensor over hardware serial
+    if (!rvc.begin(&Serial2))
+    { // connect to the sensor over hardware serial
         Serial.println("Could not find BNO08x!");
-        
-        while (1){
+
+        while (1)
+        {
             Serial2.println("bug0");
             delay(10);
         }
-          
-      }
-
+    }
 
     //   while(1){
     //     Serial2.println("test");
@@ -81,7 +83,7 @@ void sensors_begin(TwoWire &wire){
 
     // if (!bno08x.enableReport(SH2_ACCELEROMETER, 100000))
     // {
-        
+
     //     while (1)
     //     {
     //         Serial.println("Could not enable accelerometer");
@@ -90,9 +92,7 @@ void sensors_begin(TwoWire &wire){
     //     }
     // }
 
-   
-
-    delay(10);  
+    delay(10);
     pinMode(ACTIVITY_PIN, OUTPUT);
     pinMode(PULSE_PIN, OUTPUT);
 }
@@ -120,28 +120,28 @@ void sensors_run()
     xTaskCreate(
         task_temperature,
         "task_temperature", // Task name
-        2048,           // stack size
-        NULL,           // Task parameters
-        8,              // Task priority
-        NULL            // Task handler
+        2048,               // stack size
+        NULL,               // Task parameters
+        8,                  // Task priority
+        NULL                // Task handler
     );
 
     xTaskCreate(
         task_accelerometer,
         "task_accelerometer", // Task name
-        2048,           // stack size
-        NULL,           // Task parameters
-        7,              // Task priority
-        NULL            // Task handler
+        2048,                 // stack size
+        NULL,                 // Task parameters
+        7,                    // Task priority
+        NULL                  // Task handler
     );
 
     xTaskCreate(
         task_data_output,
         "task_data_output", // Task name
-        20480,           // stack size
-        NULL,           // Task parameters
-        10,              // Task priority
-        NULL            // Task handler
+        20480,              // stack size
+        NULL,               // Task parameters
+        10,                 // Task priority
+        NULL                // Task handler
     );
 
     // xTaskCreate(
@@ -166,6 +166,10 @@ void task_temperature(void *parameters)
         // temperature_tmp117 = readTemperature();
         // vTaskDelay(1 / portTICK_PERIOD_MS);
         temperature_max = particleSensor.readTemperature();
+        delay(1);
+        vbatt = readBattVoltage();
+        delay(1);
+        pbatt = readBattPercentage();
 
         // Serial.print("Temperature: ");
         // Serial.print(temperature);
@@ -239,26 +243,27 @@ void task_heartout(void *parameters)
     }
 }
 
-void task_accelerometer(void *parameters){
+void task_accelerometer(void *parameters)
+{
     TickType_t xLastWakeTime;
     const TickType_t xFrequency = pdMS_TO_TICKS(100); // 100 ms
 
     // Initialize the xLastWakeTime variable with the current time.
     xLastWakeTime = xTaskGetTickCount();
-    
+
     BNO08x_RVC_Data heading;
 
     while (1)
     {
-        if (rvc.read(&heading)) {
+        if (rvc.read(&heading))
+        {
             acc_x = heading.x_accel;
             acc_y = heading.y_accel;
             acc_z = heading.z_accel;
-          }
-         
-          vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        }
+
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
-    
 
     // while(1) {
     //     sh2_SensorValue_t bnoValues;
@@ -277,55 +282,79 @@ void task_accelerometer(void *parameters){
     // }
 }
 
-void task_data_output(void * parameters){
+void task_data_output(void *parameters)
+{
     TickType_t xLastWakeTime;
-    const TickType_t xFrequency = pdMS_TO_TICKS(1000); // Convert 200 ms to ticks
+    const TickType_t xFrequency = pdMS_TO_TICKS(500); // Convert 200 ms to ticks
 
     // Initialize the xLastWakeTime variable with the current time
     xLastWakeTime = xTaskGetTickCount();
-    
-    for (;;) {
-        digitalWrite(ACTIVITY_PIN, HIGH);
+
+    for (;;)
+    {
+        
         // Output sensor data
 
-        char temp_s[20];  // Aumentado
+        char temp_s[20]; // Aumentado
         char bpm_s[20];
         char accX_s[20];
         char accY_s[20];
         char accZ_s[20];
+        char battV_s[20];
+        char battP_s[20];
 
-        snprintf(temp_s, sizeof(temp_s), "tmpMAX:%.2f", temperature_max);
-        snprintf(bpm_s, sizeof(bpm_s), "AvgBPM:%d", beatAvg);
-        snprintf(accX_s, sizeof(accX_s), "accX:%.2f", acc_x);
-        snprintf(accY_s, sizeof(accY_s), "accY:%.2f", acc_y);
-        snprintf(accZ_s, sizeof(accZ_s), "accZ:%.2f", acc_z);
+        snprintf(temp_s, sizeof(temp_s), "%.2f", temperature_max);
+        snprintf(bpm_s, sizeof(bpm_s), "%d", beatAvg);
+        snprintf(accX_s, sizeof(accX_s), "%.2f", acc_x);
+        snprintf(accY_s, sizeof(accY_s), "%.2f", acc_y);
+        snprintf(accZ_s, sizeof(accZ_s), "%.2f", acc_z);
+        snprintf(battV_s, sizeof(battV_s), "%.2f", vbatt);
+        snprintf(battP_s, sizeof(battP_s), "%.2f", pbatt);
 
-
-        
-        if (deviceConnected) {
+        if (deviceConnected)
+        {   
+            digitalWrite(ACTIVITY_PIN, HIGH);
             temperatureCharacteristic->setValue(temp_s);
             heartRateCharacteristic->setValue(bpm_s);
             accXCharacteristic->setValue(accX_s);
             accYCharacteristic->setValue(accY_s);
             accZCharacteristic->setValue(accZ_s);
+            battVCharacteristic->setValue(battV_s);
+            battPCharacteristic->setValue(battP_s);
+            
+
             temperatureCharacteristic->notify();
-            // heartRateCharacteristic->notify();
-            // accXCharacteristic->notify();
-            // accYCharacteristic->notify();
-            // accZCharacteristic->notify();
+            heartRateCharacteristic->notify();
+            accXCharacteristic->notify();
+            accYCharacteristic->notify();
+            accZCharacteristic->notify();
+            vTaskDelay(pdMS_TO_TICKS(1));
+            battVCharacteristic->notify();
+            battPCharacteristic->notify();
+
+            Serial.print("tmpMAX:");
+            Serial.print(temperature_max);
+            Serial.print(",AvgBPM:");
+            Serial.print(beatAvg);
+            Serial.print(",accX:");
+            Serial.print(acc_x);
+            Serial.print(",accY:");
+            Serial.print(acc_y);
+            Serial.print(",accZ:");
+            Serial.print(acc_z);
+            Serial.print(",vbatt:");
+            Serial.print(battV_s);
+            Serial.print(",pbatt:");
+            Serial.print(battP_s);
+            Serial.print(",devConnected:");
+            Serial.println(deviceConnected);
         }
-        
+
         // temperatureCharacteristic->notify();
         // applicationCharacteristic->setValue((String(temperature_tmp117).c_str()));
 
-
         // Serial.print("tmp117:");Serial.print(temperature_tmp117);
-        Serial.print("tmpMAX:");Serial.print(temperature_max);
-        Serial.print(",AvgBPM:");Serial.print(beatAvg);
-        Serial.print(",accX:");Serial.print(acc_x);
-        Serial.print(",accY:");Serial.print(acc_y);
-        Serial.print(",accZ:");Serial.print(acc_z);
-        Serial.print(",devConnected:");Serial.println(deviceConnected);
+ 
 
         // vTaskDelay(pdMS_TO_TICKS(20));
         digitalWrite(ACTIVITY_PIN, LOW);
@@ -334,13 +363,15 @@ void task_data_output(void * parameters){
     }
 }
 
-void task_tft(void *parameters) {
+void task_tft(void *parameters)
+{
     TickType_t xLastWakeTime;
     const TickType_t xFrequency = pdMS_TO_TICKS(500); // Update every 1000 ms
 
     xLastWakeTime = xTaskGetTickCount();
 
-    while (1) {
+    while (1)
+    {
         tft.fillScreen(ST77XX_BLACK); // Clear screen
 
         tft.setCursor(0, 0);
@@ -364,4 +395,40 @@ void task_tft(void *parameters) {
 
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
+}
+
+float readBattVoltage()
+{
+    Wire.beginTransmission(MAX17048_I2CADDR_DEFAULT);
+    Wire.write(VBATT_ADDRESS); // Voltage register
+    Wire.endTransmission(false);
+    Wire.requestFrom(MAX17048_I2CADDR_DEFAULT, 2);
+
+    if (Wire.available() == 2)
+    {
+        uint8_t msb = Wire.read();
+        uint8_t lsb = Wire.read();
+        uint16_t voltage_raw = ((uint16_t)msb << 8) | lsb;
+        //   voltage_raw >>= 4; // lower 4 bits are not used
+        return voltage_raw * 0.000078125; // each bit = 1.25 mV
+    }
+    return -1.0; // error
+}
+
+float readBattPercentage()
+{
+    Wire.beginTransmission(MAX17048_I2CADDR_DEFAULT);
+    Wire.write(PBATT_ADDRESS); // Voltage register
+    Wire.endTransmission(false);
+    Wire.requestFrom(MAX17048_I2CADDR_DEFAULT, 2);
+
+    if (Wire.available() == 2)
+    {
+        uint8_t msb = Wire.read();
+        uint8_t lsb = Wire.read();
+        uint16_t percentage_raw = ((uint16_t)msb << 8) | lsb;
+        //   voltage_raw >>= 4; // lower 4 bits are not used
+        return percentage_raw * 0.00390635; // each bit = 1.25 mV
+    }
+    return -1.0; // error
 }

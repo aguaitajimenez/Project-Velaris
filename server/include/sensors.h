@@ -43,6 +43,8 @@ extern BLECharacteristic* heartRateCharacteristic;
 extern BLECharacteristic* accXCharacteristic;
 extern BLECharacteristic* accYCharacteristic;
 extern BLECharacteristic* accZCharacteristic;
+extern BLECharacteristic* battVCharacteristic;
+extern BLECharacteristic* battPCharacteristic;
 
 extern bool deviceConnected;
 
@@ -74,6 +76,8 @@ void task_heartAndO2monitor(void *parameters);
 void task_accelerometer(void *parameters);
 void task_data_output(void * parameters);
 void task_tft(void *parameters);
+float readBattVoltage();
+float readBattPercentage();
 
 // -----------------------------------------------------------------------------
 // Optional Class Definition
