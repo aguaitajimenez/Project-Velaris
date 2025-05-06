@@ -38,7 +38,6 @@ class MyServerCallbacks : public BLEServerCallbacks {
 // HardwareSerial bnoSerial(1);
 void setup() {
     Serial.begin(115200);
-    // mySerial.begin(115200);
     Serial2.begin(115200, SERIAL_8N1, 18, 17);
     while (!Serial2)
     delay(10);
