@@ -38,58 +38,16 @@ String my_battV = "0";
 String my_battP = "0";
 int rssi = 0;
 
-// Callback de notificación
-void notifyCallback(BLERemoteCharacteristic *pChar, uint8_t *pData, size_t length, bool isNotify)
-{
-  String value = String((char *)pData, length);
-  // Serial.print("Notify from ");
-  // Serial.print(pChar->getUUID().toString().c_str());
-  // Serial.print(": ");
-  // Serial.print(value);
-  // Serial.println();
+uint64_t time_request = 10000;
+const uint64_t request_period = 500e3;
 
-  // Store value in corresponding variable
-  if (pChar->getUUID().equals(hrUUID))
-  {
-    bpm = value;
-  }
-  else if (pChar->getUUID().equals(tempUUID))
-  {
-    temp = value;
-  }
-  else if (pChar->getUUID().equals(accXUUID))
-  {
-    accX = value;
-  }
-  else if (pChar->getUUID().equals(accYUUID))
-  {
-    accY = value;
-  }
-  else if (pChar->getUUID().equals(accZUUID))
-  {
-    accZ = value;
-  }
-  else if (pChar->getUUID().equals(battVUUID))
-  {
-    wrist_battV = value;
-    // Serial.println(wrist_battV);
-  }
-  else if (pChar->getUUID().equals(battPUUID))
-  {
-    wrist_battP = value;
-  }
-}
-
-class MyClientCallback : public BLEClientCallbacks
-{
-  void onConnect(BLEClient *pClient) override
-  {
+class MyClientCallback : public BLEClientCallbacks{
+  void onConnect(BLEClient *pClient) override{
     digitalWrite(CONNECTED_LED_PIN, HIGH);
     Serial.println("Connected to BLE server.");
   }
 
-  void onDisconnect(BLEClient *pClient) override
-  {
+  void onDisconnect(BLEClient *pClient) override{
     digitalWrite(CONNECTED_LED_PIN, LOW);
     Serial.println("Disconnected from BLE server.");
     connected = false;
@@ -97,13 +55,11 @@ class MyClientCallback : public BLEClientCallbacks
   }
 };
 
-bool connectToServer()
-{
+bool connectToServer(){
   Serial.print("Connecting to ");
   Serial.println(myDevice->getAddress().toString().c_str());
 
-  if (myDevice->haveName())
-  {
+  if (myDevice->haveName()){
     Serial.print("Device name: ");
     Serial.println(myDevice->getName().c_str());
   }
@@ -113,8 +69,7 @@ bool connectToServer()
   pClient->connect(myDevice);
 
   BLERemoteService *pService = pClient->getService(serviceUUID);
-  if (!pService)
-  {
+  if (!pService){
     Serial.println("Failed to find service.");
     pClient->disconnect();
     return false;
@@ -128,35 +83,17 @@ bool connectToServer()
   battVChar = pService->getCharacteristic(battVUUID);
   battPChar = pService->getCharacteristic(battPUUID);
 
-  if (tempChar && tempChar->canNotify())
-    tempChar->registerForNotify(notifyCallback);
-  if (hrChar && hrChar->canNotify())
-    hrChar->registerForNotify(notifyCallback);
-  if (accXChar && accXChar->canNotify())
-    accXChar->registerForNotify(notifyCallback);
-  if (accYChar && accYChar->canNotify())
-    accYChar->registerForNotify(notifyCallback);
-  if (accZChar && accZChar->canNotify())
-    accZChar->registerForNotify(notifyCallback);
-  if (battVChar && battVChar->canNotify())
-    battVChar->registerForNotify(notifyCallback);
-  if (battPChar && battPChar->canNotify())
-    battPChar->registerForNotify(notifyCallback);
-
   connected = true;
   return true;
 }
 
 // Escaneo BLE
-class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
-{
-  void onResult(BLEAdvertisedDevice advertisedDevice) override
-  {
+class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks{
+  void onResult(BLEAdvertisedDevice advertisedDevice) override{
     Serial.print("Device found: ");
     Serial.print(advertisedDevice.getAddress().toString().c_str());
 
-    if (advertisedDevice.haveName())
-    {
+    if (advertisedDevice.haveName()){
       Serial.print(" Name: ");
       Serial.print(advertisedDevice.getName().c_str());
     }
@@ -164,8 +101,7 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
     Serial.print(" RSSI: ");
     Serial.println(advertisedDevice.getRSSI());
 
-    if (advertisedDevice.haveName() && advertisedDevice.getName() == SERVER_NAME)
-    {
+    if (advertisedDevice.haveName() && advertisedDevice.getName() == SERVER_NAME){
       BLEDevice::getScan()->stop();
       myDevice = new BLEAdvertisedDevice(advertisedDevice);
       doConnect = true;
@@ -179,13 +115,11 @@ unsigned int localPort = 8000;
 const char *ssid = "WhiteSky-Ion";
 const char *password = "32889754";
 
-void setup()
-{
+void setup(){
   Serial.begin(115200);
   Wire.begin();
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED)
-  {
+  while (WiFi.status() != WL_CONNECTED){
     delay(200);
     Serial.print(F("."));
   }
@@ -205,36 +139,38 @@ void setup()
   pScan->setActiveScan(true);
 }
 
-void loop()
-{
-  if (doConnect)
-  {
-    if (connectToServer())
-    {
+void loop(){
+  if (doConnect){
+    if (connectToServer()){
       Serial.println("Connected and subscribed to notifications.");
     }
-    else
-    {
+    else{
       Serial.println("Connection failed.");
     }
     doConnect = false;
   }
 
-  if (!connected && doScan)
-  {
+  if (!connected && doScan){
     BLEDevice::getScan()->start(0); // restart scan
     doScan = false;
   }
 
-  if (connected)
-  {
+  if (connected && ((esp_timer_get_time()-time_request) > request_period)){
+    
+    temp = tempChar->readValue().c_str();
+    bpm = hrChar->readValue().c_str();
+    accX = accXChar->readValue().c_str();
+    accY = accYChar->readValue().c_str();
+    accZ = accZChar->readValue().c_str();
+    wrist_battV = battVChar->readValue().c_str();
+    wrist_battP = battPChar->readValue().c_str();
     my_battV = readBattVoltage();
-    rssi = pClient->getRssi();
     my_battP = readBattPercentage();
     
+    rssi = pClient->getRssi();
+
     IPAddress iotIP;
-    if (WiFi.hostByName("iot.local", iotIP))
-    {
+    if (WiFi.hostByName("iot.local", iotIP)){
 
       String json = "{";
       json += "\"id\":\"" + String(device_id) + "\",";
@@ -264,8 +200,7 @@ void loop()
       Serial.print("Payload:");
       Serial.println(json);
     }
-    else
-    {
+    else{
       Serial.println("Hostname resolution failed.");
     }
 
@@ -273,15 +208,13 @@ void loop()
   }
 }
 
-float readBattVoltage()
-{
+float readBattVoltage(){
   Wire.beginTransmission(MAX17048_I2CADDR_DEFAULT);
   Wire.write(VBATT_ADDRESS); // Voltage register
   Wire.endTransmission(false);
   Wire.requestFrom(MAX17048_I2CADDR_DEFAULT, 2);
 
-  if (Wire.available() == 2)
-  {
+  if (Wire.available() == 2){
     uint8_t msb = Wire.read();
     uint8_t lsb = Wire.read();
     uint16_t voltage_raw = ((uint16_t)msb << 8) | lsb;
@@ -291,15 +224,13 @@ float readBattVoltage()
   return -1.0; // error
 }
 
-float readBattPercentage()
-{
+float readBattPercentage(){
   Wire.beginTransmission(MAX17048_I2CADDR_DEFAULT);
   Wire.write(PBATT_ADDRESS); // Voltage register
   Wire.endTransmission(false);
   Wire.requestFrom(MAX17048_I2CADDR_DEFAULT, 2);
 
-  if (Wire.available() == 2)
-  {
+  if (Wire.available() == 2){
     uint8_t msb = Wire.read();
     uint8_t lsb = Wire.read();
     uint16_t percentage_raw = ((uint16_t)msb << 8) | lsb;

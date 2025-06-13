@@ -65,32 +65,17 @@ void sensors_begin(TwoWire &wire)
     particleSensor.setPulseAmplitudeGreen(0);         // Turn off Green LED
     delay(10);
 
-    if (!rvc.begin(&Serial2))
+    if (!rvc.begin(&Serial1))
     { // connect to the sensor over hardware serial
         Serial.println("Could not find BNO08x!");
 
         while (1)
         {
-            Serial2.println("bug0");
+            Serial1.println("bug0");
             delay(10);
         }
     }
 
-    //   while(1){
-    //     Serial2.println("test");
-    //     delay(100);
-    // }
-
-    // if (!bno08x.enableReport(SH2_ACCELEROMETER, 100000))
-    // {
-
-    //     while (1)
-    //     {
-    //         Serial.println("Could not enable accelerometer");
-    //         Serial2.println("bug");
-    //         delay(10);
-    //     }
-    // }
 
     delay(10);
     pinMode(ACTIVITY_PIN, OUTPUT);
@@ -246,7 +231,7 @@ void task_heartout(void *parameters)
 void task_accelerometer(void *parameters)
 {
     TickType_t xLastWakeTime;
-    const TickType_t xFrequency = pdMS_TO_TICKS(100); // 100 ms
+    const TickType_t xFrequency = pdMS_TO_TICKS(10); // 100 ms
 
     // Initialize the xLastWakeTime variable with the current time.
     xLastWakeTime = xTaskGetTickCount();
@@ -265,21 +250,6 @@ void task_accelerometer(void *parameters)
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 
-    // while(1) {
-    //     sh2_SensorValue_t bnoValues;
-
-    //     // Check if new sensor data is available
-    //     if (bno08x.getSensorEvent(&bnoValues)) {
-    //         if (bnoValues.sensorId == SH2_ACCELEROMETER) {
-    //             acc_x = bnoValues.un.accelerometer.x;
-    //             acc_y = bnoValues.un.accelerometer.y;
-    //             acc_z = bnoValues.un.accelerometer.z;
-    //         }
-    //     }
-
-    //     // Wait for the next cycle.
-    //     vTaskDelayUntil(&xLastWakeTime, xFrequency);
-    // }
 }
 
 void task_data_output(void *parameters)
@@ -322,16 +292,8 @@ void task_data_output(void *parameters)
             battVCharacteristic->setValue(battV_s);
             battPCharacteristic->setValue(battP_s);
             
-
-            temperatureCharacteristic->notify();
-            heartRateCharacteristic->notify();
-            accXCharacteristic->notify();
-            accYCharacteristic->notify();
-            accZCharacteristic->notify();
-            vTaskDelay(pdMS_TO_TICKS(1));
-            battVCharacteristic->notify();
-            battPCharacteristic->notify();
-
+            // temperatureCharacteristic->notify();
+            
             Serial.print("tmpMAX:");
             Serial.print(temperature_max);
             Serial.print(",AvgBPM:");
@@ -350,13 +312,6 @@ void task_data_output(void *parameters)
             Serial.println(deviceConnected);
         }
 
-        // temperatureCharacteristic->notify();
-        // applicationCharacteristic->setValue((String(temperature_tmp117).c_str()));
-
-        // Serial.print("tmp117:");Serial.print(temperature_tmp117);
- 
-
-        // vTaskDelay(pdMS_TO_TICKS(20));
         digitalWrite(ACTIVITY_PIN, LOW);
         // Wait for the next cycle
         vTaskDelayUntil(&xLastWakeTime, xFrequency);

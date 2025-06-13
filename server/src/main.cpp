@@ -38,13 +38,14 @@ class MyServerCallbacks : public BLEServerCallbacks {
 // HardwareSerial bnoSerial(1);
 void setup() {
     Serial.begin(115200);
-    Serial2.begin(115200, SERIAL_8N1, 18, 17);
-    while (!Serial2)
-    delay(10);
+    Serial1.begin(115200, SERIAL_8N1, 18, 17);
+    Serial2.begin(115200, SERIAL_8N1, 9, 10);
+    while (!Serial1)
+        delay(10);
     
     // Wire.begin();
     sensors_begin(Wire);
-    delay(1000); // give peripherals some time
+    delay(100); // give peripherals some time
     Serial.println("Starting BLE Server with Temperature Service");
 
     // Initialize BLE
@@ -60,37 +61,37 @@ void setup() {
     // Create and set up temperature characteristic with descriptor
     temperatureCharacteristic = applicationService->createCharacteristic(
         TEMPERATURE_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ  | BLECharacteristic::PROPERTY_NOTIFY
+        BLECharacteristic::PROPERTY_READ
     );
     
     heartRateCharacteristic = applicationService->createCharacteristic(
         HEARTRATE_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+        BLECharacteristic::PROPERTY_READ
     );
     
     accXCharacteristic = applicationService->createCharacteristic(
         ACCX_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+        BLECharacteristic::PROPERTY_READ
     );
     
     accYCharacteristic = applicationService->createCharacteristic(
         ACCY_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+        BLECharacteristic::PROPERTY_READ
     );
     
     accZCharacteristic = applicationService->createCharacteristic(
         ACCZ_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+        BLECharacteristic::PROPERTY_READ
     );
 
     battVCharacteristic = applicationService->createCharacteristic(
         BATTV_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+        BLECharacteristic::PROPERTY_READ
     );
 
     battPCharacteristic = applicationService->createCharacteristic(
         BATTP_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+        BLECharacteristic::PROPERTY_READ
     );
 
 

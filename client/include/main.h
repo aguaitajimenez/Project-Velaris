@@ -17,6 +17,8 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
+#include "esp_timer.h"
+
 // ==== Constants ====
 
 #define CONNECTED_LED_PIN        13
