@@ -2,10 +2,9 @@
 
 #define UART_TRACES 1
 
-#define BLUETOOTH_TASK 1
-#define LORA_TASK 1
-
 #define PERIOD_MS 1000
+
+#define BLUETOOTH_PIN 18
 
 // UUID del servicio y características
 static BLEUUID serviceUUID("eab293ea-ab75-4fa3-a21f-66a937c57000");
@@ -38,20 +37,19 @@ BLERemoteCharacteristic *battPChar;
 
 
 typedef enum{
-  bl_idle,
-  bl_transmission,
-  bl_search,
-} bluetooth_state_t;
+  Bluetooth,
+  LoRa
+} client_state_t;
 
-bluetooth_state_t bluetooth_state = bl_search;
+client_state_t state = LoRa;
 
 
-typedef enum{
-  lora_idle,
-  lora_transmission,
-} lora_state_t;
+// typedef enum{
+//   lora_idle,
+//   lora_transmission,
+// } lora_state_t;
 
-lora_state_t lora_state = lora_idle;
+// lora_state_t lora_state = lora_idle;
 
 
 const int device_id = 1;
@@ -135,9 +133,9 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks{
     Serial.println(advertisedDevice.getRSSI());
 
     if (advertisedDevice.haveName() && advertisedDevice.getName() == SERVER_NAME){
+      bl_detected_f = true;
       BLEDevice::getScan()->stop();
       myDevice = new BLEAdvertisedDevice(advertisedDevice);
-      bl_detected_f = true;
     }
   }
 };
@@ -154,7 +152,7 @@ void setup()
 
   Serial.begin(5000000);
   // Configure GPIO18 as input with internal pull-up
-  pinMode(18, INPUT_PULLUP);
+  pinMode(BLUETOOTH_PIN, INPUT_PULLUP);
 
 
   Wire.begin();
@@ -182,146 +180,104 @@ void setup()
   pScan->setWindow(449);
   pScan->setActiveScan(true);
 
-  bool bluetooth_enabled = digitalRead(18);  // HIGH means enabled, LOW means disabled
-  
-  #if BLUETOOTH_TASK
-  if (bluetooth_enabled) {
-    xTaskCreate(
-        bluetooth_task,
-        "bluetooth_task", // Task name
-        20480,            // stack size
-        NULL,             // Task parameters
-        2,                // Task priority
-        NULL              // Task handler
-    );
-  }
-#endif
 
-
-  #if LORA_TASK  
   xTaskCreate(
-      lora_task,
+      bluetooth_task,
       "bluetooth_task", // Task name
-      20480,       // stack size
-      NULL,        // Task parameters
-      2,           // Task priority
-      NULL         // Task handler
+      20480,            // stack size
+      NULL,             // Task parameters
+      2,                // Task priority
+      NULL              // Task handler
   );
-  #endif 
+  
 
 }
 
 void bluetooth_task(void *parameters){
+  client_state_t next_state = LoRa;
+  bool lora_ret = 0;
+
+  #if UART_TRACES
+      bl_connected_f ? Serial.println("Connected to notifications.") :
+      Serial.println("Connection failed.");
+#endif
+
+  BLEDevice::getScan()->start(0);
+  lora_config_f = loraConfig();
 
   TickType_t xLastWakeTime;
   const TickType_t xFrequency = pdMS_TO_TICKS(PERIOD_MS); // Convert PERIOD_MS to ticks
   xLastWakeTime = xTaskGetTickCount();
-
-  bluetooth_state_t next_bluetooth_state = bl_idle;
-
 
   while (1){
 
     // **************
     // State function
     // **************
+
     #if UART_TRACES
-    Serial.println("Bluetooth state:" + int(bluetooth_state));
+    state==LoRa ? Serial.println("Lora State") :  Serial.println("Bluetooth State");
     #endif
 
-    switch (bluetooth_state){
-    case bl_idle:
-      if(bl_detected_f){
-        bl_detected_f = false;
-        bl_connected_f = connectToServer();
-        xLastWakeTime = xTaskGetTickCount();
-        next_bluetooth_state = bl_transmission;
+    bool bluetooth_pin = digitalRead(BLUETOOTH_PIN);
+
+    switch (state){
+    case LoRa:
+      if(bl_connected_f && bluetooth_pin){
+        next_state = Bluetooth;
+        break;
       }
 
-#if UART_TRACES
-      bl_connected_f ? Serial.println("Connected to notifications.") :
-      Serial.println("Connection failed.");
-#endif
+      // If bluetooth pin is GND, it executes
+      // If bl_connected or bl_detected_f it wont execute
+      if(!(bluetooth_pin && (bl_connected_f || bl_detected_f))){
+        lora_ret = loraReceiveAndForward();
+        if(lora_ret){
+          digitalWrite(LORA_LED, 1);
+          vTaskDelay(pdMS_TO_TICKS(50)); // To see the blink
+          digitalWrite(LORA_LED, 0);
+        }
+        next_state = LoRa;
+        break;
+      }
+
+      if(bl_detected_f && bluetooth_pin){
+        bl_connected_f = 0;
+        bl_connected_f = connectToServer();
+        next_state = LoRa;
+        break;
+      }
 
       break;
 
-    case bl_transmission:
+    case Bluetooth:
+      if(!bluetooth_pin){
+        pClient->disconnect();
+        next_state = LoRa;
+        break;
+      }
+
       if(bl_connected_f){
           digitalWrite(BL_LED, 1);
           blRead();
           sendJSON();
           digitalWrite(BL_LED, 0);
+          next_state = Bluetooth;
           break;
       }
       if(!bl_connected_f){
-        next_bluetooth_state = bl_search;
-      }
-      break;
-
-    case bl_search:
-        BLEDevice::getScan()->start(0); // restart scan
-        next_bluetooth_state = bl_idle;
-      break;
-
-    default:
-      next_bluetooth_state = bl_search;
-      break;
-    }
-
-    bluetooth_state = next_bluetooth_state;
-    vTaskDelayUntil(&xLastWakeTime, xFrequency);
-  }
-}
-
-void lora_task(void *parameters){
-
-  vTaskDelay(pdMS_TO_TICKS(PERIOD_MS*.5));
-
-  TickType_t xLastWakeTime;
-  const TickType_t xFrequency = pdMS_TO_TICKS(PERIOD_MS); // Convert 200 ms to ticks
-  xLastWakeTime = xTaskGetTickCount();
-
-  lora_state_t next_lora_state = lora_idle;
-
-  while (1){
-  // ***************
-  // State functions
-  // ***************
-
-  #if UART_TRACES
-  Serial.println("LoRa state:" + int(lora_state));
-  #endif
-
-  switch (lora_state){
-    case lora_idle:
-      if(!bl_connected_f){
         lora_config_f = loraConfig();
-        next_lora_state = lora_transmission;
+        BLEDevice::getScan()->start(0);
+        next_state = LoRa;
       }
       break;
 
-    case lora_transmission:
-      if(!bl_connected_f){
-        digitalWrite(LORA_LED, 1);
-        loraReceiveAndForward();
-        next_lora_state = lora_transmission;
-        delay(10);
-        digitalWrite(LORA_LED, 0);
-      }
-      if(bl_connected_f){
-        next_lora_state = lora_idle;
-      }
-      if(!lora_config_f){
-        next_lora_state = lora_idle;
-      }
-      break;
-    
     default:
-      next_lora_state = lora_idle;
+      next_state = LoRa;
       break;
     }
 
-    lora_state = next_lora_state;
+    state = next_state;
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
   }
 }
@@ -440,7 +396,8 @@ bool loraConfig() {
 }
 
 bool loraReceiveAndForward() {
-  if (rf95.available()) {
+  bool ret = rf95.available(); 
+  if (ret) {
     uint8_t len = sizeof(loraPacket);
     if (rf95.recv((uint8_t *)loraPacket, &len)) {
       loraPacket[len] = '\0';  // Null-terminate
@@ -464,7 +421,7 @@ bool loraReceiveAndForward() {
     }
   }
 
-  return false;
+  return ret;
 }
 
 void loop(){
