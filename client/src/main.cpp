@@ -1,7 +1,11 @@
 #include "main.h"
 
 #define UART_TRACES 1
-#define PERIOD_MS 500
+
+#define BLUETOOTH_TASK 1
+#define LORA_TASK 1
+
+#define PERIOD_MS 1000
 
 // UUID del servicio y características
 static BLEUUID serviceUUID("eab293ea-ab75-4fa3-a21f-66a937c57000");
@@ -32,14 +36,14 @@ BLERemoteCharacteristic *accZChar;
 BLERemoteCharacteristic *battVChar;
 BLERemoteCharacteristic *battPChar;
 
-typedef enum
-{
+
+typedef enum{
   bl_idle,
   bl_transmission,
   bl_search,
 } bluetooth_state_t;
 
-bluetooth_state_t bluetooth_state = bl_idle;
+bluetooth_state_t bluetooth_state = bl_search;
 
 
 typedef enum{
@@ -48,6 +52,7 @@ typedef enum{
 } lora_state_t;
 
 lora_state_t lora_state = lora_idle;
+
 
 const int device_id = 1;
 String bpm = "0";
@@ -71,15 +76,11 @@ char loraPacket[MAX_LORA_PACKET_LEN];
 
 class MyClientCallback : public BLEClientCallbacks
 {
-  void onConnect(BLEClient *pClient) override
-  {
-    digitalWrite(CONNECTED_LED_PIN, HIGH);
+  void onConnect(BLEClient *pClient) override{
     Serial.println("Connected to BLE server.");
   }
 
-  void onDisconnect(BLEClient *pClient) override
-  {
-    digitalWrite(CONNECTED_LED_PIN, LOW);
+  void onDisconnect(BLEClient *pClient) override{
     Serial.println("Disconnected from BLE server.");
     bl_connected_f = false;
   }
@@ -149,7 +150,13 @@ const char *password = "32889754";
 
 void setup()
 {
+  delay(3000);
+
   Serial.begin(5000000);
+  // Configure GPIO18 as input with internal pull-up
+  pinMode(18, INPUT_PULLUP);
+
+
   Wire.begin();
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED){
@@ -159,8 +166,12 @@ void setup()
   udp.begin(localPort);
   Serial.printf("UDP Client : %s:%i \n", WiFi.localIP().toString().c_str(), localPort);
 
-  pinMode(CONNECTED_LED_PIN, OUTPUT);
-  digitalWrite(CONNECTED_LED_PIN, LOW);
+  pinMode(BL_LED, OUTPUT);
+  digitalWrite(BL_LED, LOW);
+
+  pinMode(LORA_LED, OUTPUT);
+  digitalWrite(LORA_LED, LOW); // Start OFF
+
 
   Serial.println("Starting BLE Client...");
   BLEDevice::init("");
@@ -171,15 +182,23 @@ void setup()
   pScan->setWindow(449);
   pScan->setActiveScan(true);
 
-  xTaskCreate(
-      bluetooth_task,
-      "bluetooth_task", // Task name
-      20480,       // stack size
-      NULL,        // Task parameters
-      3,           // Task priority
-      NULL         // Task handler
-  );
+  bool bluetooth_enabled = digitalRead(18);  // HIGH means enabled, LOW means disabled
+  
+  #if BLUETOOTH_TASK
+  if (bluetooth_enabled) {
+    xTaskCreate(
+        bluetooth_task,
+        "bluetooth_task", // Task name
+        20480,            // stack size
+        NULL,             // Task parameters
+        2,                // Task priority
+        NULL              // Task handler
+    );
+  }
+#endif
 
+
+  #if LORA_TASK  
   xTaskCreate(
       lora_task,
       "bluetooth_task", // Task name
@@ -188,15 +207,18 @@ void setup()
       2,           // Task priority
       NULL         // Task handler
   );
+  #endif 
+
 }
 
 void bluetooth_task(void *parameters){
 
   TickType_t xLastWakeTime;
-  const TickType_t xFrequency = pdMS_TO_TICKS(PERIOD_MS); // Convert 200 ms to ticks
+  const TickType_t xFrequency = pdMS_TO_TICKS(PERIOD_MS); // Convert PERIOD_MS to ticks
   xLastWakeTime = xTaskGetTickCount();
 
   bluetooth_state_t next_bluetooth_state = bl_idle;
+
 
   while (1){
 
@@ -204,7 +226,7 @@ void bluetooth_task(void *parameters){
     // State function
     // **************
     #if UART_TRACES
-    Serial.println("Bluetooth state:" + bluetooth_state);
+    Serial.println("Bluetooth state:" + int(bluetooth_state));
     #endif
 
     switch (bluetooth_state){
@@ -212,6 +234,7 @@ void bluetooth_task(void *parameters){
       if(bl_detected_f){
         bl_detected_f = false;
         bl_connected_f = connectToServer();
+        xLastWakeTime = xTaskGetTickCount();
         next_bluetooth_state = bl_transmission;
       }
 
@@ -224,9 +247,11 @@ void bluetooth_task(void *parameters){
 
     case bl_transmission:
       if(bl_connected_f){
-        blRead();
-        sendJSON();
-        next_bluetooth_state = bl_transmission;
+          digitalWrite(BL_LED, 1);
+          blRead();
+          sendJSON();
+          digitalWrite(BL_LED, 0);
+          break;
       }
       if(!bl_connected_f){
         next_bluetooth_state = bl_search;
@@ -250,6 +275,8 @@ void bluetooth_task(void *parameters){
 
 void lora_task(void *parameters){
 
+  vTaskDelay(pdMS_TO_TICKS(PERIOD_MS*.5));
+
   TickType_t xLastWakeTime;
   const TickType_t xFrequency = pdMS_TO_TICKS(PERIOD_MS); // Convert 200 ms to ticks
   xLastWakeTime = xTaskGetTickCount();
@@ -262,7 +289,7 @@ void lora_task(void *parameters){
   // ***************
 
   #if UART_TRACES
-  Serial.println("LoRa state:" + lora_state);
+  Serial.println("LoRa state:" + int(lora_state));
   #endif
 
   switch (lora_state){
@@ -275,8 +302,11 @@ void lora_task(void *parameters){
 
     case lora_transmission:
       if(!bl_connected_f){
+        digitalWrite(LORA_LED, 1);
         loraReceiveAndForward();
         next_lora_state = lora_transmission;
+        delay(10);
+        digitalWrite(LORA_LED, 0);
       }
       if(bl_connected_f){
         next_lora_state = lora_idle;
@@ -354,19 +384,19 @@ bool sendJSON(){
   if (WiFi.hostByName("iot.local", iotIP)){
 
     String json = "{";
-    json += "\"id\":\"" + String(device_id) + "\",";
-    json += "\"rssi\":" + String(rssi) + ",";
-    json += "\"temperature\":" + temp + ",";
-    json += "\"acceleration\":{";
-    json += "\"x\":" + accX + ",";
-    json += "\"y\":" + accY + ",";
-    json += "\"z\":" + accZ;
+    json += "\"id\":\"" + String(device_id) + "\",";  // id
+    json += "\"rs\":" + String(rssi) + ",";           // rssi → rs
+    json += "\"tmp\":" + temp + ",";                  // temperature → tmp
+    json += "\"acc\":{";                              // acceleration → acc
+    json += "\"x\":" + accX + ",";                    // x
+    json += "\"y\":" + accY + ",";                    // y
+    json += "\"z\":" + accZ;                          // z
     json += "},";
-    json += "\"bpm\":" + bpm + ",";
-    json += "\"wrist_battV\":" + wrist_battV + ",";
-    json += "\"wrist_battP\":" + wrist_battP + ",";
-    json += "\"my_battV\":" + my_battV + ",";
-    json += "\"my_battP\":" + my_battP;
+    json += "\"bpm\":" + bpm + ",";                   // bpm
+    json += "\"wbv\":" + wrist_battV + ",";           // wrist batt voltage
+    json += "\"wbp\":" + wrist_battP + ",";           // wrist batt percent
+    json += "\"mbv\":" + my_battV + ",";              // my batt voltage
+    json += "\"mbp\":" + my_battP;                    // my batt percent
     json += "}";
 
     // Serial.print("Payload: ");
@@ -381,11 +411,10 @@ bool sendJSON(){
     }
 
 #if UART_TRACES
-    Serial.print("Packet sent to ");
-    Serial.println(iotIP);
     Serial.print("Payload:");
     Serial.println(json);
 #endif
+
   }
   else{
     return 1;
@@ -416,7 +445,7 @@ bool loraReceiveAndForward() {
     if (rf95.recv((uint8_t *)loraPacket, &len)) {
       loraPacket[len] = '\0';  // Null-terminate
 
-      Serial.println("LoRa packet received:");
+      Serial.println("LoRa forward:");
       Serial.println(loraPacket);
 
       IPAddress iotIP;
@@ -424,13 +453,6 @@ bool loraReceiveAndForward() {
         udp.beginPacket(iotIP, localPort);
         udp.print(loraPacket);
         udp.endPacket();
-
-#if UART_TRACES
-        Serial.print("LoRa UDP packet sent to ");
-        Serial.println(iotIP);
-        Serial.print("Payload: ");
-        Serial.println(loraPacket);
-#endif
 
         return true;
       } else {

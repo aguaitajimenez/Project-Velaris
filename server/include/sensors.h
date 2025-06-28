@@ -16,14 +16,16 @@
 #include "heartRate.h"
 #include "spo2_algorithm.h"
 #include "Adafruit_BNO08x_RVC.h"
+#include "Adafruit_GPS.h"
+
 
 // #include "BNO08x.h"
-
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
+
+// Include for RH_RF95
+#include <RH_RF95.h>
 #include <SPI.h>
-
-
 
 // -----------------------------------------------------------------------------
 // Constants and Macros
@@ -32,6 +34,11 @@
 #define ACTIVITY_PIN    13 // Built-in LED on most Arduino boards
 #define PULSE_PIN       12
 #define TMP117_ADDRESS 0x48 // Default I2C address for TMP117
+
+// LoRa pins
+#define RFM95_CS 8     // Chip select
+#define RFM95_INT 14     // DIO0 (interrupt)
+
 
 // BLE Service and Characteristic
 extern BLEService* applicationService;
@@ -46,7 +53,12 @@ extern BLECharacteristic* accZCharacteristic;
 extern BLECharacteristic* battVCharacteristic;
 extern BLECharacteristic* battPCharacteristic;
 
-extern bool deviceConnected;
+extern bool bl_connected_f;
+
+// Define and variables for GPS and LoRa
+#define ENABLE_GPS_LORA_PIN 5
+#define GPS_LED_PIN 11
+
 
 // TFT display pins
 // #define TFT_CS        7
@@ -74,10 +86,17 @@ void task_heartmonitor(void * parameters);
 void task_heartout(void *parameters);
 void task_heartAndO2monitor(void *parameters);
 void task_accelerometer(void *parameters);
-void task_data_output(void * parameters);
+void task_output(void *parameters);
 void task_tft(void *parameters);
+void task_gps(void *parameters);
+
+
+
 float readBattVoltage();
 float readBattPercentage();
+void errorGPS();
+bool loraConfig();
+bool sendLoraPacket();
 
 // -----------------------------------------------------------------------------
 // Optional Class Definition

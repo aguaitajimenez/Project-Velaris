@@ -1,14 +1,11 @@
 #include "main.h"
 
-
-
 // BLE Server and Advertising objects
 BLEServer* pServer;
 BLEAdvertising* pAdvertising;
 
 // BLE Service and Characteristic
 BLEService* applicationService;
-
 
 BLECharacteristic* temperatureCharacteristic;
 BLECharacteristic* heartRateCharacteristic;
@@ -18,18 +15,18 @@ BLECharacteristic* accZCharacteristic;
 BLECharacteristic* battVCharacteristic;
 BLECharacteristic* battPCharacteristic;
 
-bool deviceConnected = false;
+bool bl_connected_f = false;
 int counter = 0;
 
 class MyServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* pServer){
-        deviceConnected = true;
-        delay(100);
+        bl_connected_f = true;
+        delay(10);
         pAdvertising->start();
     }
 
     void onDisconnect(BLEServer* pServer){
-        deviceConnected = false;
+        bl_connected_f = false;
         // Optional: restart advertising so others can connect
         pAdvertising->start();
     }
@@ -37,16 +34,19 @@ class MyServerCallbacks : public BLEServerCallbacks {
 
 // HardwareSerial bnoSerial(1);
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(5000000);
     Serial1.begin(115200, SERIAL_8N1, 18, 17);
-    Serial2.begin(115200, SERIAL_8N1, 9, 10);
+    
+    // while (!Serial)
+    //     delay(10);
     while (!Serial1)
         delay(10);
     
     // Wire.begin();
     sensors_begin(Wire);
-    delay(100); // give peripherals some time
-    Serial.println("Starting BLE Server with Temperature Service");
+    delay(50); // give peripherals some time
+    Serial.println("Starting BLE Server");
+
 
     // Initialize BLE
     BLEDevice::init(DEVICE_NAME);

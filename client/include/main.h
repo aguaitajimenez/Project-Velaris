@@ -24,7 +24,9 @@
 
 // ==== Constants ====
 
-#define CONNECTED_LED_PIN        13
+#define BL_LED      12
+#define LORA_LED    11
+
 #define SERVER_NAME              "ESP32_Advertiser"
 
 // MAX17048 Fuel Gauge (I2C)

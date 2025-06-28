@@ -1,5 +1,11 @@
 #include "sensors.h"
 
+#define DATAECHO 0
+#define GPSECHO 0
+
+
+#define GPSTASK 1
+
 #define TEMP_DELAY_MS 500
 #define TEMP_DELAY_TICKS (TEMP_DELAY_MS / portTICK_PERIOD_MS)
 
@@ -34,16 +40,70 @@ float pbatt = 0;
 // int32_t heartRate; //heart rate value
 // int8_t validHeartRate; //indicator to show if the heart rate calculation is valid
 
+
+bool lora_config_f = 0;
+
+// Output variables
+typedef enum{
+    idle,
+    bluetooth,
+    lora
+} server_state_t;
+
+
+
+
+// Acc variables;
 Adafruit_BNO08x_RVC rvc = Adafruit_BNO08x_RVC();
-// sh2_SensorValue_t bnoValues;
 float acc_x = 0;
 float acc_y = 0;
 float acc_z = 0;
 
+// GPS variables
+Adafruit_GPS gps(&Serial2);
+
+bool gps_fix = false;
+uint8_t gps_fixquality = 0;
+float gps_lat = 0.0;
+char gps_lat_dir = 'N';
+float gps_lon = 0.0;
+char gps_lon_dir = 'E';
+float gps_altitude = 0.0;
+uint8_t gps_satellites = 0;
+
+// GPS data spinlock for thread safety
+portMUX_TYPE gpsMux = portMUX_INITIALIZER_UNLOCKED;
+
+// LoRa variables
+RH_RF95 rf95(RFM95_CS, RFM95_INT);
+
 void sensors_begin(TwoWire &wire)
 {
 
+    pinMode(GPS_LED_PIN, OUTPUT);
+    digitalWrite(GPS_LED_PIN, LOW); // Start with LED off
+
+    // Step 1: Start Serial2 at default GPS baud (usually 9600)
+    Serial2.begin(9600, SERIAL_8N1, 10, 9);
+    gps.begin(9600);
+
+    delay(100); // Wait a moment before sending configuration
+
+    // Step 2: Set GPS to use 115200 baud
+    gps.sendCommand("$PMTK251,115200*1F"); // Set baud to 115200
+    delay(100);                            // Allow time for the GPS module to switch baud rate
+
+    // Step 3: Restart Serial2 and gps at 115200 baud
+    Serial2.flush(); // Clear any old data
+    Serial2.end();
+    delay(100);
+
+    Serial2.begin(115200, SERIAL_8N1, 10, 9);
+    gps.begin(115200);
+
     pinMode(TFT_I2C_POWER, OUTPUT);
+    pinMode(ENABLE_GPS_LORA_PIN, OUTPUT);
+    digitalWrite(ENABLE_GPS_LORA_PIN, HIGH);
     digitalWrite(TFT_I2C_POWER, LOW);
     delay(50);
 
@@ -52,11 +112,6 @@ void sensors_begin(TwoWire &wire)
     wirePort->begin();
     wirePort->setClock(400000);
     delay(10);
-    // tft.init(135, 240); // Initialize ST7789 240x135
-    // tft.setRotation(3);
-    // tft.fillScreen(ST77XX_BLACK);
-    // tft.setTextColor(ST77XX_WHITE);
-    // tft.setTextSize(1);
 
     // Configure HR sensor
     particleSensor.begin(*wirePort, I2C_SPEED_FAST);
@@ -76,7 +131,6 @@ void sensors_begin(TwoWire &wire)
         }
     }
 
-
     delay(10);
     pinMode(ACTIVITY_PIN, OUTPUT);
     pinMode(PULSE_PIN, OUTPUT);
@@ -87,9 +141,9 @@ void sensors_run()
     xTaskCreate(
         task_heartmonitor,
         "task_heartmonitor", // Task name
-        2048,                // stack size
+        4096,                // stack size
         NULL,                // Task parameters
-        8,                   // Task priority
+        10,                  // Task priority
         NULL                 // Task handler
     );
 
@@ -107,61 +161,52 @@ void sensors_run()
         "task_temperature", // Task name
         2048,               // stack size
         NULL,               // Task parameters
-        8,                  // Task priority
+        7,                  // Task priority
         NULL                // Task handler
     );
 
     xTaskCreate(
         task_accelerometer,
         "task_accelerometer", // Task name
-        2048,                 // stack size
+        4096,                 // stack size
         NULL,                 // Task parameters
-        7,                    // Task priority
+        8,                    // Task priority
         NULL                  // Task handler
     );
 
     xTaskCreate(
-        task_data_output,
-        "task_data_output", // Task name
+        task_output,
+        "task_output", // Task name
         20480,              // stack size
         NULL,               // Task parameters
-        10,                 // Task priority
+        9,                  // Task priority
         NULL                // Task handler
     );
 
-    // xTaskCreate(
-    //     task_tft,
-    //     "task_tft",
-    //     2048,
-    //     NULL,
-    //     10,
-    //     NULL
-    // );
+#if GPSTASK
+    xTaskCreate(
+        task_gps,
+        "task_gps", // Task name
+        4096,       // stack size
+        NULL,       // Task parameters
+        2,          // Task priority
+        NULL        // Task handler
+    );
+#endif
+
 }
 
 void task_temperature(void *parameters)
 {
-
     TickType_t xLastWakeTime = xTaskGetTickCount(); // Initialize time reference
-
     while (1)
     {
-        // digitalWrite(ACTIVITY_PIN, HIGH); // Turn the LED on
 
-        // temperature_tmp117 = readTemperature();
-        // vTaskDelay(1 / portTICK_PERIOD_MS);
         temperature_max = particleSensor.readTemperature();
-        delay(1);
+        vTaskDelay(pdMS_TO_TICKS(1));
         vbatt = readBattVoltage();
-        delay(1);
+        vTaskDelay(pdMS_TO_TICKS(1));
         pbatt = readBattPercentage();
-
-        // Serial.print("Temperature: ");
-        // Serial.print(temperature);
-        // Serial.println(" °C");
-        // temperatureCharacteristic->setValue(String(temperature_tmp117).c_str());
-
-        // digitalWrite(LED_PIN, LOW); // Turn the LED off
         vTaskDelayUntil(&xLastWakeTime, TEMP_DELAY_TICKS);
     }
 }
@@ -249,30 +294,27 @@ void task_accelerometer(void *parameters)
 
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
-
 }
 
-void task_data_output(void *parameters)
-{
+void task_output(void *parameters)
+{   
+    server_state_t state = idle;
+
     TickType_t xLastWakeTime;
-    const TickType_t xFrequency = pdMS_TO_TICKS(500); // Convert 200 ms to ticks
+    const TickType_t xFrequency = pdMS_TO_TICKS(1000); // Convert 200 ms to ticks
 
     // Initialize the xLastWakeTime variable with the current time
     xLastWakeTime = xTaskGetTickCount();
 
-    for (;;)
-    {
-        
-        // Output sensor data
+    server_state_t next_state = idle;
 
-        char temp_s[20]; // Aumentado
-        char bpm_s[20];
-        char accX_s[20];
-        char accY_s[20];
-        char accZ_s[20];
-        char battV_s[20];
-        char battP_s[20];
+    while(1){
 
+        char temp_s[20], bpm_s[20];
+        char accX_s[20], accY_s[20], accZ_s[20];
+        char battV_s[20], battP_s[20];
+
+        // Write string messages in each variable
         snprintf(temp_s, sizeof(temp_s), "%.2f", temperature_max);
         snprintf(bpm_s, sizeof(bpm_s), "%d", beatAvg);
         snprintf(accX_s, sizeof(accX_s), "%.2f", acc_x);
@@ -281,74 +323,194 @@ void task_data_output(void *parameters)
         snprintf(battV_s, sizeof(battV_s), "%.2f", vbatt);
         snprintf(battP_s, sizeof(battP_s), "%.2f", pbatt);
 
-        if (deviceConnected)
-        {   
-            digitalWrite(ACTIVITY_PIN, HIGH);
-            temperatureCharacteristic->setValue(temp_s);
-            heartRateCharacteristic->setValue(bpm_s);
-            accXCharacteristic->setValue(accX_s);
-            accYCharacteristic->setValue(accY_s);
-            accZCharacteristic->setValue(accZ_s);
-            battVCharacteristic->setValue(battV_s);
-            battPCharacteristic->setValue(battP_s);
-            
-            // temperatureCharacteristic->notify();
-            
-            Serial.print("tmpMAX:");
-            Serial.print(temperature_max);
-            Serial.print(",AvgBPM:");
-            Serial.print(beatAvg);
-            Serial.print(",accX:");
-            Serial.print(acc_x);
-            Serial.print(",accY:");
-            Serial.print(acc_y);
-            Serial.print(",accZ:");
-            Serial.print(acc_z);
-            Serial.print(",vbatt:");
-            Serial.print(battV_s);
-            Serial.print(",pbatt:");
-            Serial.print(battP_s);
-            Serial.print(",devConnected:");
-            Serial.println(deviceConnected);
+        
+        
+        switch (state) {
+        case idle:
+            Serial.println("[STATE] IDLE");
+            break;
+        case bluetooth:
+            Serial.println("[STATE] BLUETOOTH");
+            break;
+        case lora:
+            Serial.println("[STATE] LORA");
+            break;
+        default:
+            Serial.println("[STATE] UNKNOWN");
+            break;
         }
 
+        switch (state){
+
+        case idle:
+            if(bl_connected_f){
+                next_state = bluetooth;
+                break;
+            }
+            if (!bl_connected_f){
+                next_state = lora;
+                break;
+            }
+            
+            next_state = bl_connected_f ? bluetooth : lora;
+            break;
+        
+        case bluetooth:
+            if (!bl_connected_f){
+                lora_config_f = loraConfig();
+                next_state = lora;
+                break;
+            }
+
+            if(bl_connected_f){
+                digitalWrite(ACTIVITY_PIN, HIGH);
+                temperatureCharacteristic->setValue(temp_s);
+                heartRateCharacteristic->setValue(bpm_s);
+                accXCharacteristic->setValue(accX_s);
+                accYCharacteristic->setValue(accY_s);
+                accZCharacteristic->setValue(accZ_s);
+                battVCharacteristic->setValue(battV_s);
+                battPCharacteristic->setValue(battP_s);
+                next_state = bluetooth;
+            }
+            
+            break;
+        
+        case lora:
+            if(!lora_config_f){
+                next_state = bluetooth;
+                break;
+            }
+
+            if(!bl_connected_f){
+                digitalWrite(ACTIVITY_PIN, 1);
+                sendLoraPacket();
+                vTaskDelay(pdMS_TO_TICKS(200));
+                digitalWrite(ACTIVITY_PIN, 0);
+                next_state = lora;
+                break;
+            }
+
+            if(bl_connected_f){
+                next_state = bluetooth;
+                break;
+            }
+            break;
+        
+        default:
+            break;
+        }        
+        
+
+#if DATAECHO
+        portENTER_CRITICAL(&gpsMux);
+        bool fix = gps_fix;
+        uint8_t quality = gps_fixquality;
+        float lat = gps_lat;
+        char lat_dir = gps_lat_dir;
+        float lon = gps_lon;
+        char lon_dir = gps_lon_dir;
+        float alt = gps_altitude;
+        uint8_t sats = gps_satellites;
+        portEXIT_CRITICAL(&gpsMux);
+
+        Serial.print("tmpMAX:");
+        Serial.print(temperature_max);
+        Serial.print(",AvgBPM:");
+        Serial.print(beatAvg);
+        Serial.print(",accX:");
+        Serial.print(acc_x);
+        Serial.print(",accY:");
+        Serial.print(acc_y);
+        Serial.print(",accZ:");
+        Serial.print(acc_z);
+        Serial.print(",vbatt:");
+        Serial.print(battV_s);
+        Serial.print(",pbatt:");
+        Serial.print(battP_s);
+        Serial.print(",devConnected:");
+        Serial.println(bl_connected_f);
+
+        // Then print safely outside the critical section
+        Serial.print("GPS fix: ");
+        Serial.print((int)fix);
+        Serial.print(" quality: ");
+        Serial.println((int)quality);
+
+        if (fix)
+        {
+            Serial.print("Location: ");
+            Serial.print(lat, 4);
+            Serial.print(lat_dir);
+            Serial.print(", ");
+            Serial.print(lon, 4);
+            Serial.println(lon_dir);
+
+            Serial.print("Altitude: ");
+            Serial.println(alt);
+            Serial.print("Satellites: ");
+            Serial.println((int)sats);
+        }
+#endif
+
+        state = next_state;
         digitalWrite(ACTIVITY_PIN, LOW);
-        // Wait for the next cycle
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 
-void task_tft(void *parameters)
+void task_gps(void *parameters)
 {
-    TickType_t xLastWakeTime;
-    const TickType_t xFrequency = pdMS_TO_TICKS(500); // Update every 1000 ms
 
-    xLastWakeTime = xTaskGetTickCount();
+    int64_t time_us = esp_timer_get_time();
+    gps.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
+    gps.sendCommand(PMTK_SET_NMEA_UPDATE_200_MILLIHERTZ);
+
+
+    vTaskDelay(pdMS_TO_TICKS(5000));
 
     while (1)
     {
-        tft.fillScreen(ST77XX_BLACK); // Clear screen
+        if (Serial2.available())
+        {
+            char c = gps.read();
+#if GPSECHO
+            if (GPSECHO && c)
+                Serial.write(c);
+#endif
 
-        tft.setCursor(0, 0);
-        tft.print("tmp117: ");
-        tft.println(temperature_tmp117);
+            if (gps.newNMEAreceived())
+            {
+                if (!gps.parse(gps.lastNMEA()))
+                {
+                    // Failed to parse, skip
+                    continue;
+                }
+            }
 
-        tft.print("tmpMAX: ");
-        tft.println(temperature_max);
+            if (esp_timer_get_time() - time_us > 1e6)
+            {
+                time_us = esp_timer_get_time();
 
-        tft.print("AvgBPM: ");
-        tft.println(beatAvg);
+                portENTER_CRITICAL(&gpsMux);
+                gps_fix = gps.fix;
+                if (gps_fix)
+                {
+                    // If location is known, print it
+                    gps_fixquality = gps.fixquality;
+                    gps_lat = gps.latitude;
+                    gps_lat_dir = gps.lat;
+                    gps_lon = gps.longitude;
+                    gps_lon_dir = gps.lon;
+                    gps_altitude = gps.altitude;
+                    gps_satellites = gps.satellites;
+                }
+                portEXIT_CRITICAL(&gpsMux);
 
-        tft.print("accX: ");
-        tft.println(acc_x);
-
-        tft.print("accY: ");
-        tft.println(acc_y);
-
-        tft.print("accZ: ");
-        tft.println(acc_z);
-
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+                gps.fix ? digitalWrite(GPS_LED_PIN, HIGH) : digitalWrite(GPS_LED_PIN, LOW);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
@@ -387,3 +549,93 @@ float readBattPercentage()
     }
     return -1.0; // error
 }
+
+void errorGPS(){
+    digitalWrite(GPS_LED_PIN, HIGH);
+    vTaskDelay(pdMS_TO_TICKS(40));
+    digitalWrite(GPS_LED_PIN, LOW);
+    vTaskDelay(pdMS_TO_TICKS(40));
+    digitalWrite(GPS_LED_PIN, HIGH);
+    vTaskDelay(pdMS_TO_TICKS(40));
+    digitalWrite(GPS_LED_PIN, LOW);
+    vTaskDelay(pdMS_TO_TICKS(40));
+    digitalWrite(GPS_LED_PIN, HIGH);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    digitalWrite(GPS_LED_PIN, LOW);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    digitalWrite(GPS_LED_PIN, HIGH);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    digitalWrite(GPS_LED_PIN, LOW);
+    vTaskDelay(pdMS_TO_TICKS(200));
+}
+
+bool loraConfig() {
+  if (!rf95.init()) {
+    Serial.println("LoRa init failed!");
+    return 0;
+  }
+
+  if (!rf95.setFrequency(RF95_FREQ)) {
+    Serial.println("LoRa frequency setup failed!");
+    return 0;
+  }
+
+  rf95.setTxPower(14, false); // 14 dBm, useRFO = false
+  Serial.println("LoRa config OK");
+  return 1;
+}
+
+bool sendLoraPacket() {
+    // Copy values from globals to local safe versions
+    portENTER_CRITICAL(&gpsMux);
+    bool fix = gps_fix;
+    uint8_t quality = gps_fixquality;
+    float lat = gps_lat;
+    char lat_dir = gps_lat_dir;
+    float lon = gps_lon;
+    char lon_dir = gps_lon_dir;
+    float alt = gps_altitude;
+    uint8_t sats = gps_satellites;
+    portEXIT_CRITICAL(&gpsMux);
+
+    // Format sensor data from globals
+    char temp_s[20], bpm_s[20];
+    char accX_s[20], accY_s[20], accZ_s[20];
+    char battV_s[20], battP_s[20];
+
+    snprintf(temp_s, sizeof(temp_s), "%.2f", temperature_max);
+    snprintf(bpm_s, sizeof(bpm_s), "%d", beatAvg);
+    snprintf(accX_s, sizeof(accX_s), "%.2f", acc_x);
+    snprintf(accY_s, sizeof(accY_s), "%.2f", acc_y);
+    snprintf(accZ_s, sizeof(accZ_s), "%.2f", acc_z);
+    snprintf(battV_s, sizeof(battV_s), "%.2f", vbatt);
+    snprintf(battP_s, sizeof(battP_s), "%.2f", pbatt);
+
+    // Construct JSON string
+    String json = "{";
+    json += "\"id\":\"0\",";                 // id
+    json += "\"wbv\":" + String(battV_s) + ",";   // wrist_battV → bv
+    json += "\"wbp\":" + String(battP_s) + ",";   // wrist_battP → bp
+    json += "\"g\":{";                           // gps → g
+    json += "\"f\":" + String(fix ? 1 : 0) + ","; // fix → f
+    json += "\"la\":" + String(lat, 6) + ",";    // lat → la
+    json += "\"ld\":\"" + String(lat_dir) + "\","; // lat_dir → ld
+    json += "\"lo\":" + String(lon, 6) + ",";    // lon → lo
+    json += "\"lod\":\"" + String(lon_dir) + "\","; // lon_dir → lod
+    json += "\"a\":" + String(alt, 6) + ",";     // altitude → a
+    json += "\"s\":" + String(sats);            // satellites → s
+    json += "}";
+    json += "}";
+
+
+    bool sent = rf95.send((uint8_t *)json.c_str(), json.length());
+    rf95.waitPacketSent();
+
+#if UART_TRACES
+    Serial.println("LoRa packet sent:");
+    Serial.println(json);
+#endif
+
+    return sent;
+}
+

@@ -17,6 +17,9 @@
 #include <BLEAdvertising.h>
 #include "sensors.h"
 #include "Wire.h"
+#include <SPI.h>
+#include <RH_RF95.h>
+#include "Adafruit_GPS.h"
 
 // -----------------------------------------------------------------------------
 // Constants and Macros
@@ -37,6 +40,15 @@
 #define BATTV_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc005"
 #define BATTP_CHARACTERISTIC_UUID "6bd16e28-6f99-40b9-abe5-dfc1ad6dc006"
 // #define DESCRIPTOR_UUID "2901"     // Descriptor UUID
+
+
+
+
+// RFM95 defines
+#define RFM95_CS     8
+#define RFM95_RST    9
+#define RFM95_INT   14
+#define RF95_FREQ 915.0
 
 // -----------------------------------------------------------------------------
 // Type Definitions
