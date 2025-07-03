@@ -5,23 +5,23 @@
 #define PERIOD_MS 1000
 
 #define BLUETOOTH_PIN 18
+#define STATE_LED 13
+
 
 // UUID del servicio y características
 static BLEUUID serviceUUID("eab293ea-ab75-4fa3-a21f-66a937c57000");
-
 static BLEUUID tempUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc000");
 static BLEUUID hrUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc001");
-static BLEUUID accXUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc002");
-static BLEUUID accYUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc003");
-static BLEUUID accZUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc004");
-static BLEUUID battVUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc005");
-static BLEUUID battPUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc006");
+static BLEUUID accUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc002");
+static BLEUUID battUUID("6bd16e28-6f99-40b9-abe5-dfc1ad6dc005");
+
 
 // Flags y punteros
-static boolean bl_detected_f = false;
-static boolean bl_connected_f = false;
+static bool bl_detected_f = false;
+static bool bl_connected_f = false;
+static bool bl_notify_f = false;
+static bool bl_scan_f = false;
 bool lora_config_f = false;
-
 
 
 static BLEAdvertisedDevice *myDevice;
@@ -29,11 +29,8 @@ static BLEAdvertisedDevice *myDevice;
 BLEClient *pClient = nullptr;
 BLERemoteCharacteristic *tempChar;
 BLERemoteCharacteristic *hrChar;
-BLERemoteCharacteristic *accXChar;
-BLERemoteCharacteristic *accYChar;
-BLERemoteCharacteristic *accZChar;
-BLERemoteCharacteristic *battVChar;
-BLERemoteCharacteristic *battPChar;
+BLERemoteCharacteristic *accChar;
+BLERemoteCharacteristic *battChar;
 
 
 typedef enum{
@@ -71,7 +68,6 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);  // Already declared in your code
 char loraPacket[MAX_LORA_PACKET_LEN];
 
 
-
 class MyClientCallback : public BLEClientCallbacks
 {
   void onConnect(BLEClient *pClient) override{
@@ -84,8 +80,46 @@ class MyClientCallback : public BLEClientCallbacks
   }
 };
 
-bool connectToServer()
-{
+void notifyCallback(BLERemoteCharacteristic* pChar, uint8_t* pData, size_t length, bool isNotify) {
+    std::string uuid = pChar->getUUID().toString();
+    String value = String((char*)pData); // assumes data is null-terminated string
+
+    char buffer[64];  // adjust size based on expected max payload
+    size_t len = min(length, sizeof(buffer) - 1);
+    memcpy(buffer, pData, len);
+    buffer[len] = '\0';  // ensure null-terminated string
+
+    if (uuid == tempUUID.toString()) {
+        temp = String(buffer);
+    } else if (uuid == hrUUID.toString()) {
+        bpm = String(buffer);
+    } else if (uuid == accUUID.toString()) {
+          String full = String(buffer);
+          int sep1 = full.indexOf(';');
+          int sep2 = full.indexOf(';', sep1 + 1);
+
+          if (sep1 > 0 && sep2 > sep1) {
+              accX = full.substring(0, sep1);
+              accY = full.substring(sep1 + 1, sep2);
+              accZ = full.substring(sep2 + 1);
+          }
+
+    } else if (uuid == battUUID.toString()) {
+            String full = String(buffer);
+            int sep = full.indexOf(';');
+            if (sep > 0) {
+                wrist_battV = full.substring(0, sep);
+                wrist_battP = full.substring(sep + 1);
+      }
+    }
+
+    bl_notify_f = true;
+
+}
+
+
+
+bool connectToServer(){
   Serial.print("Connecting to ");
   Serial.println(myDevice->getAddress().toString().c_str());
 
@@ -97,7 +131,12 @@ bool connectToServer()
 
   pClient = BLEDevice::createClient();
   pClient->setClientCallbacks(new MyClientCallback());
-  pClient->connect(myDevice);
+
+  if (!pClient->connect(myDevice))
+  {
+    Serial.println("Failed to connect.");
+    return false;
+  }
 
   BLERemoteService *pService = pClient->getService(serviceUUID);
   if (!pService)
@@ -109,30 +148,36 @@ bool connectToServer()
 
   tempChar = pService->getCharacteristic(tempUUID);
   hrChar = pService->getCharacteristic(hrUUID);
-  accXChar = pService->getCharacteristic(accXUUID);
-  accYChar = pService->getCharacteristic(accYUUID);
-  accZChar = pService->getCharacteristic(accZUUID);
-  battVChar = pService->getCharacteristic(battVUUID);
-  battPChar = pService->getCharacteristic(battPUUID);
+  accChar = pService->getCharacteristic(accUUID);
+  battChar = pService->getCharacteristic(battUUID);
 
+  if (tempChar && tempChar->canNotify()) tempChar->registerForNotify(notifyCallback);
+  if (hrChar && hrChar->canNotify()) hrChar->registerForNotify(notifyCallback);
+  if (accChar && accChar->canNotify()) accChar->registerForNotify(notifyCallback);
+  if (battChar && battChar->canNotify()) battChar->registerForNotify(notifyCallback);
+
+  bl_connected_f = true;
   return true;
 }
+
 
 // Escaneo BLE
 class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks{
   void onResult(BLEAdvertisedDevice advertisedDevice) override{
-    Serial.print("Device found: ");
-    Serial.print(advertisedDevice.getAddress().toString().c_str());
-
-    if (advertisedDevice.haveName()){
-      Serial.print(" Name: ");
-      Serial.print(advertisedDevice.getName().c_str());
-    }
-
-    Serial.print(" RSSI: ");
-    Serial.println(advertisedDevice.getRSSI());
+    
 
     if (advertisedDevice.haveName() && advertisedDevice.getName() == SERVER_NAME){
+      Serial.print("Device found: ");
+      Serial.print(advertisedDevice.getAddress().toString().c_str());
+
+      if (advertisedDevice.haveName()){
+        Serial.print(" Name: ");
+        Serial.print(advertisedDevice.getName().c_str());
+      }
+
+      Serial.print(" RSSI: ");
+      Serial.println(advertisedDevice.getRSSI());
+      
       bl_detected_f = true;
       BLEDevice::getScan()->stop();
       myDevice = new BLEAdvertisedDevice(advertisedDevice);
@@ -148,7 +193,6 @@ const char *password = "32889754";
 
 void setup()
 {
-  delay(3000);
 
   Serial.begin(5000000);
   // Configure GPIO18 as input with internal pull-up
@@ -158,7 +202,7 @@ void setup()
   Wire.begin();
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED){
-    delay(200);
+    delay(100);
     Serial.print(F("."));
   }
   udp.begin(localPort);
@@ -170,6 +214,8 @@ void setup()
   pinMode(LORA_LED, OUTPUT);
   digitalWrite(LORA_LED, LOW); // Start OFF
 
+  pinMode(STATE_LED, OUTPUT);
+
 
   Serial.println("Starting BLE Client...");
   BLEDevice::init("");
@@ -179,8 +225,7 @@ void setup()
   pScan->setInterval(1349);
   pScan->setWindow(449);
   pScan->setActiveScan(true);
-
-
+  
   xTaskCreate(
       bluetooth_task,
       "bluetooth_task", // Task name
@@ -189,8 +234,15 @@ void setup()
       2,                // Task priority
       NULL              // Task handler
   );
-  
 
+  xTaskCreate(
+      scan_task,
+      "scan_task", // Task name
+      20480,            // stack size
+      NULL,             // Task parameters
+      1,                // Task priority
+      NULL              // Task handler
+  );
 }
 
 void bluetooth_task(void *parameters){
@@ -202,7 +254,6 @@ void bluetooth_task(void *parameters){
       Serial.println("Connection failed.");
 #endif
 
-  BLEDevice::getScan()->start(0);
   lora_config_f = loraConfig();
 
   TickType_t xLastWakeTime;
@@ -219,31 +270,31 @@ void bluetooth_task(void *parameters){
     state==LoRa ? Serial.println("Lora State") :  Serial.println("Bluetooth State");
     #endif
 
+    state==LoRa ? digitalWrite(STATE_LED, 1) : digitalWrite(STATE_LED, 0);
     bool bluetooth_pin = digitalRead(BLUETOOTH_PIN);
 
     switch (state){
     case LoRa:
-      if(bl_connected_f && bluetooth_pin){
+      if(bl_connected_f){
         next_state = Bluetooth;
         break;
       }
 
-      // If bluetooth pin is GND, it executes
-      // If bl_connected or bl_detected_f it wont execute
-      if(!(bluetooth_pin && (bl_connected_f || bl_detected_f))){
-        lora_ret = loraReceiveAndForward();
-        if(lora_ret){
-          digitalWrite(LORA_LED, 1);
-          vTaskDelay(pdMS_TO_TICKS(50)); // To see the blink
-          digitalWrite(LORA_LED, 0);
-        }
+      if(bl_detected_f && bluetooth_pin){
+        bl_detected_f = 0;
+        bl_connected_f = connectToServer();
         next_state = LoRa;
         break;
       }
 
-      if(bl_detected_f && bluetooth_pin){
-        bl_connected_f = 0;
-        bl_connected_f = connectToServer();
+      if((!bl_connected_f)){
+        bl_scan_f = 1;
+        lora_ret = loraReceiveAndForward();
+        if(lora_ret){
+          digitalWrite(LORA_LED, 1);
+          vTaskDelay(pdMS_TO_TICKS(5)); // To see the blink
+          digitalWrite(LORA_LED, 0);
+        }
         next_state = LoRa;
         break;
       }
@@ -253,21 +304,22 @@ void bluetooth_task(void *parameters){
     case Bluetooth:
       if(!bluetooth_pin){
         pClient->disconnect();
+        lora_config_f = loraConfig();
         next_state = LoRa;
         break;
       }
 
-      if(bl_connected_f){
+      if(bl_connected_f && bl_notify_f){
+          bl_notify_f = false;
           digitalWrite(BL_LED, 1);
-          blRead();
           sendJSON();
           digitalWrite(BL_LED, 0);
           next_state = Bluetooth;
           break;
       }
+
       if(!bl_connected_f){
         lora_config_f = loraConfig();
-        BLEDevice::getScan()->start(0);
         next_state = LoRa;
       }
       break;
@@ -279,6 +331,17 @@ void bluetooth_task(void *parameters){
 
     state = next_state;
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
+  }
+}
+
+void scan_task(void *parameters){
+  vTaskDelay(pdMS_TO_TICKS(500));
+  while(1){
+    if(bl_scan_f){
+      bl_scan_f = 0;
+      BLEDevice::getScan()->start(1);
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -320,12 +383,12 @@ bool blRead(){
   try{
     temp = tempChar->readValue().c_str();
     bpm = hrChar->readValue().c_str();
-    accX = accXChar->readValue().c_str();
-    accY = accYChar->readValue().c_str();
-    accZ = accZChar->readValue().c_str();
-    wrist_battV = battVChar->readValue().c_str();
-    wrist_battP = battPChar->readValue().c_str();
-    my_battV = readBattVoltage();
+    accX = accChar->readValue().c_str();
+    accY = accChar->readValue().c_str();
+    accZ = accChar->readValue().c_str();
+    wrist_battV = battChar->readValue().c_str();
+    wrist_battP = battChar->readValue().c_str();
+    my_battV = readBattVoltage(); 
     my_battP = readBattPercentage();
     rssi = pClient->getRssi();
   }
@@ -336,6 +399,8 @@ bool blRead(){
 }
 
 bool sendJSON(){
+  my_battV = readBattVoltage(); 
+  my_battP = readBattPercentage();
   IPAddress iotIP;
   if (WiFi.hostByName("iot.local", iotIP)){
 
@@ -396,33 +461,36 @@ bool loraConfig() {
 }
 
 bool loraReceiveAndForward() {
-  bool ret = rf95.available(); 
-  if (ret) {
+    bool ret = false;
     uint8_t len = sizeof(loraPacket);
-    if (rf95.recv((uint8_t *)loraPacket, &len)) {
-      loraPacket[len] = '\0';  // Null-terminate
 
-      Serial.println("LoRa forward:");
-      Serial.println(loraPacket);
-
-      IPAddress iotIP;
-      if (WiFi.hostByName("iot.local", iotIP)) {
-        udp.beginPacket(iotIP, localPort);
-        udp.print(loraPacket);
-        udp.endPacket();
-
-        return true;
-      } else {
-        Serial.println("Failed to resolve iot.local");
-        return false;
-      }
-    } else {
-      Serial.println("LoRa packet receive failed.");
+    // Drain all old packets, keep only the latest
+    while (rf95.available()) {
+        len = sizeof(loraPacket);
+        if (rf95.recv((uint8_t *)loraPacket, &len)) {
+            ret = true;
+        }
     }
-  }
 
-  return ret;
+    if (ret) {
+        loraPacket[len] = '\0';
+        Serial.println("LoRa forward (latest packet):");
+        Serial.println(loraPacket);
+
+        IPAddress iotIP;
+        if (WiFi.hostByName("iot.local", iotIP)) {
+            udp.beginPacket(iotIP, localPort);
+            udp.print(loraPacket);
+            udp.endPacket();
+            return true;
+        } else {
+            Serial.println("Failed to resolve iot.local");
+            return false;
+        }
+    }
+    return false;
 }
+
 
 void loop(){
   
