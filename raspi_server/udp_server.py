@@ -13,6 +13,9 @@ UDP_PORT = 8000
 TIMEOUT_SECONDS = 10
 MAX_RSSI_HISTORY = 8
 
+latest_gps = None  # Optional
+
+
 # CSV setup
 csv_filename = "udp_log.csv"
 file_exists = os.path.isfile(csv_filename)
@@ -42,6 +45,7 @@ alert_state = 0  # 0 = safe, 1 = alert
 
 # Latest sensor snapshot
 latest_data = {
+    "type": None,
     "temperature": None,
     "bpm": None,
     "accel_x": None,
@@ -50,8 +54,17 @@ latest_data = {
     "wrist_battV": None,
     "wrist_battP": None,
     "my_battV": None,
-    "my_battP": None
+    "my_battP": None,
+    # NEW: GPS fields
+    "gps_fix": None,
+    "gps_lat": None,
+    "gps_lat_dir": None,
+    "gps_lon": None,
+    "gps_lon_dir": None,
+    "gps_alt": None,
+    "gps_sats": None
 }
+
 
 while True:
     data, addr = sock.recvfrom(1024)
@@ -62,76 +75,103 @@ while True:
 
         # Handle subscribe/unsubscribe
         if isinstance(parsed, dict) and "command" in parsed:
+            print("Received command from", addr, data)
             command = parsed["command"]
             if command == "subscribe":
                 subscribers.add(addr)
                 print(f"✅ {addr} subscribed.")
             elif command == "unsubscribe":
-                subscribers.discard(addr)
                 print(f"❌ {addr} unsubscribed.")
+                subscribers.discard(addr)
             continue
 
-        # Extract base values
         timestamp = datetime.now().isoformat()
         id_ = parsed.get("id")
-        rssi = parsed.get("rssi")
-        temperature = parsed.get("temperature")
-        bpm = parsed.get("bpm")
 
-        accel = parsed.get("acceleration", {})
-        accel_x = accel.get("x")
-        accel_y = accel.get("y")
-        accel_z = accel.get("z")
+        # 🌐 Determine packet type
+        if "tmp" in parsed and "rs" in parsed:
+            print("📦 Received BLE Packet")
+            print(f"   ID: {id_}")
+            print(f"   RSSI: {parsed['rs']}")
+            print(f"   Temperature: {parsed['tmp']}")
+            print(f"   BPM: {parsed.get('bpm')}")
+            acc = parsed.get("acc", {})
+            print(f"   Acceleration: x={acc.get('x')}, y={acc.get('y')}, z={acc.get('z')}")
+            print(f"   Wrist Battery → V: {parsed.get('wbv')}, P: {parsed.get('wbp')}")
+            print(f"   Beacon Battery → V: {parsed.get('mbv')}, P: {parsed.get('mbp')}")
 
-        wrist_batt = parsed.get("wrist_batt", {})
-        wrist_battV = wrist_batt.get("wrist_battV")
-        wrist_battP = wrist_batt.get("wrist_battP")
+            # RSSI history and CSV logging
+            rssi = parsed.get("rs")
+            if id_ is not None and rssi is not None:
+                if id_ not in rssi_history:
+                    rssi_history[id_] = deque(maxlen=MAX_RSSI_HISTORY)
+                rssi_history[id_].append(rssi)
+                last_seen_time[id_] = time.time()
 
-        my_batt = parsed.get("my_batt", {})
-        my_battV = my_batt.get("my_battV")
-        my_battP = my_batt.get("my_battP")
+                avg_rssi = sum(rssi_history[id_]) / len(rssi_history[id_])
+                distance = 10 ** ((-8 - avg_rssi - 20 * np.log10(2400) + 28) / 28)
 
-        # Maintain history of RSSI
-        if id_ is not None and rssi is not None:
-            if id_ not in rssi_history:
-                rssi_history[id_] = deque(maxlen=MAX_RSSI_HISTORY)
-            rssi_history[id_].append(rssi)
-            last_seen_time[id_] = time.time()
+                print(f"📡 Beacon '{id_}' Avg RSSI = {avg_rssi:.2f} dBm → Distance ≈ {distance:.2f} m")
 
-            # Compute average RSSI and distance
-            avg_rssi = sum(rssi_history[id_]) / len(rssi_history[id_])
-            distance = 10 ** ((-8 - avg_rssi - 20 * np.log10(2400) + 28) / 28)
+                csv_writer.writerow([timestamp, id_, rssi, avg_rssi, distance, parsed.get("tmp"), parsed.get("bpm"),
+                                     acc.get("x"), acc.get("y"), acc.get("z"),
+                                     parsed.get("wbv"), parsed.get("wbp"),
+                                     parsed.get("mbv"), parsed.get("mbp")])
 
-            print(f"📡 Beacon '{id_}' Avg RSSI = {avg_rssi:.2f} dBm → Distance ≈ {distance:.2f} m")
+                # Update latest data
+                latest_data.update({
+                    "type": "ble",
+                    "temperature": parsed.get("tmp"),
+                    "bpm": parsed.get("bpm"),
+                    "accel_x": acc.get("x"),
+                    "accel_y": acc.get("y"),
+                    "accel_z": acc.get("z"),
+                    "wrist_battV": parsed.get("wbv"),
+                    "wrist_battP": parsed.get("wbp"),
+                    "my_battV": parsed.get("mbv"),
+                    "my_battP": parsed.get("mbp")
+                })
 
-            # Log to CSV
-            csv_writer.writerow([timestamp, id_, rssi, avg_rssi, distance, temperature, bpm,
-                                 accel_x, accel_y, accel_z,
-                                 wrist_battV, wrist_battP,
-                                 my_battV, my_battP])
+        elif "g" in parsed:
+            print("📦 Received LoRa Packet")
+            gps = parsed["g"]
+            print(f"   ID: {id_}")
+            print(f"   Wrist Battery → V: {parsed.get('wbv')}, P: {parsed.get('wbp')}")
+            print(f"   Beacon Battery → V: {parsed.get('mbv')}, P: {parsed.get('mbp')}")
+            print(f"   GPS Fix: {gps.get('f')}")
+            print(f"   Latitude: {gps.get('la')} {gps.get('ld')}")
+            print(f"   Longitude: {gps.get('lo')} {gps.get('lod')}")
+            print(f"   Altitude: {gps.get('a')}")
+            print(f"   Satellites: {gps.get('s')}")
 
-        # Update latest sensor info
-        latest_data.update({
-            "temperature": temperature,
-            "bpm": bpm,
-            "accel_x": accel_x,
-            "accel_y": accel_y,
-            "accel_z": accel_z,
-            "wrist_battV": wrist_battV,
-            "wrist_battP": wrist_battP,
-            "my_battV": my_battV,
-            "my_battP": my_battP
-        })
+            # Update latest_data with GPS and battery info
+            latest_data.update({
+                "type": "lora",
+                "my_battV": float(parsed.get("mbv", 0)),
+                "my_battP": float(parsed.get("mbp", 0)),
+                "wrist_battV": float(parsed.get("wbv", 0)),
+                "wrist_battP": float(parsed.get("wbp", 0)),
+                "gps_fix": gps.get("f"),
+                "gps_lat": gps.get("la"),
+                "gps_lat_dir": gps.get("ld"),
+                "gps_lon": gps.get("lo"),
+                "gps_lon_dir": gps.get("lod"),
+                "gps_alt": gps.get("a"),
+                "gps_sats": gps.get("s")
+            })
 
-        # Print latest sensor info
-        print("\n🧾 Latest Sensor Status")
-        print(f"   Temperature: {latest_data['temperature']} °C")
-        print(f"   BPM: {latest_data['bpm']}")
-        print(f"   Acceleration → x: {latest_data['accel_x']}, y: {latest_data['accel_y']}, z: {latest_data['accel_z']}")
-        print(f"   Wrist Battery → V: {latest_data['wrist_battV']}, P: {latest_data['wrist_battP']}")
-        print(f"   Beacon Battery → V: {latest_data['my_battV']}, P: {latest_data['my_battP']}")
 
-        # Determine closest beacon
+
+            # Save latest_gps if needed elsewhere
+            latest_gps = gps
+
+
+        else:
+            print("⚠️ Unknown packet format.")
+
+        # Hysteresis and beacon tracking
+        # Hysteresis and beacon tracking
+        now = time.time()
         closest_id = None
         closest_rssi = None
         closest_distance = None
@@ -142,7 +182,6 @@ while True:
             closest_rssi = avg_rssi_dict[closest_id]
             closest_distance = 10 ** ((-8 - closest_rssi - 20 * np.log10(2400) + 28) / 28)
 
-            # ✅ Hysteresis logic for alert state
             if alert_state == 0 and closest_distance > 6:
                 alert_state = 1
             elif alert_state == 1 and closest_distance < 4:
@@ -155,49 +194,78 @@ while True:
         else:
             print("   📶 No active beacons.")
 
-        # Send update to subscribers
+        # Send to subscribers (even if no RSSI data)
         if subscribers:
             try:
-                response_payload = {
-                    "temperature": latest_data["temperature"],
-                    "bpm": latest_data["bpm"],
-                    "acceleration": {
-                        "x": latest_data["accel_x"],
-                        "y": latest_data["accel_y"],
-                        "z": latest_data["accel_z"]
-                    },
-                    "wrist_batt": {
-                        "V": latest_data["wrist_battV"],
-                        "P": latest_data["wrist_battP"]
-                    },
-                    "beacon_batt": {
-                        "V": latest_data["my_battV"],
-                        "P": latest_data["my_battP"]
-                    },
-                    "closest_beacon": closest_id,
-                    "avg_rssi": closest_rssi,
-                    "estimated_distance": closest_distance,
-                    "alert": alert_state
-                }
+                if latest_data["type"] == "ble":
+                    response_payload = {
+                        "type": latest_data["type"],
+                        "temperature": latest_data["temperature"],
+                        "bpm": latest_data["bpm"],
+                        "acceleration": {
+                            "x": latest_data["accel_x"],
+                            "y": latest_data["accel_y"],
+                            "z": latest_data["accel_z"]
+                        },
+                        "wrist_batt": {
+                            "V": latest_data["wrist_battV"],
+                            "P": latest_data["wrist_battP"]
+                        },
+                        "beacon_batt": {
+                            "V": latest_data["my_battV"],
+                            "P": latest_data["my_battP"]
+                        },
+                        "closest_beacon": closest_id,
+                        "avg_rssi": closest_rssi,
+                        "estimated_distance": closest_distance,
+                        "alert": alert_state
+                    }
+                elif latest_data["type"] == "lora":
+                    response_payload = {
+                        "type": latest_data["type"],
+                        "gps": {
+                            "fix": latest_data["gps_fix"],
+                            "lat": latest_data["gps_lat"],
+                            "lat_dir": latest_data["gps_lat_dir"],
+                            "lon": latest_data["gps_lon"],
+                            "lon_dir": latest_data["gps_lon_dir"],
+                            "alt": latest_data["gps_alt"],
+                            "sats": latest_data["gps_sats"]
+                        },
+                        "wrist_batt": {
+                            "V": latest_data["wrist_battV"],
+                            "P": latest_data["wrist_battP"]
+                        },
+                        "beacon_batt": {
+                            "V": latest_data["my_battV"],
+                            "P": latest_data["my_battP"]
+                        },
+                        "closest_beacon": closest_id,
+                        "avg_rssi": closest_rssi,
+                        "estimated_distance": closest_distance,
+                        "alert": alert_state
+                    }
+                else:
+                    response_payload = {"error": "unknown data type"}
 
                 response_json = json.dumps(response_payload).encode()
+                # print("Sending to subscribers:", response_payload)
+
                 for sub_addr in list(subscribers):
                     sock.sendto(response_json, sub_addr)
 
             except Exception as e:
                 print(f"⚠️ Failed to send update to subscribers: {e}")
 
+
+        # Remove stale beacons
+        expired_ids = [bid for bid, t in last_seen_time.items() if now - t > TIMEOUT_SECONDS]
+        for bid in expired_ids:
+            print(f"⏳ Beacon '{bid}' removed due to timeout.")
+            rssi_history.pop(bid, None)
+            last_seen_time.pop(bid, None)
+
     except json.JSONDecodeError:
         print("⚠️ Received non-JSON data.")
-        continue
     except Exception as e:
         print(f"⚠️ Error: {e}")
-        continue
-
-    # Remove stale beacons
-    now = time.time()
-    expired_ids = [bid for bid, t in last_seen_time.items() if now - t > TIMEOUT_SECONDS]
-    for bid in expired_ids:
-        print(f"⏳ Beacon '{bid}' removed due to timeout.")
-        rssi_history.pop(bid, None)
-        last_seen_time.pop(bid, None)
