@@ -1,8 +1,11 @@
 #include "main.h"
 
+const int device_id = 1;
+#define ENHANCED_BEACON 1
+
 #define UART_TRACES 1
 
-#define PERIOD_MS 1000
+#define PERIOD_MS 500
 
 #define BLUETOOTH_PIN 18
 #define STATE_LED 13
@@ -49,7 +52,6 @@ client_state_t state = LoRa;
 // lora_state_t lora_state = lora_idle;
 
 
-const int device_id = 1;
 String bpm = "0";
 String temp = "0";
 String accX = "0";
@@ -246,6 +248,7 @@ void setup()
 }
 
 void bluetooth_task(void *parameters){
+
   client_state_t next_state = LoRa;
   bool lora_ret = 0;
 
@@ -254,7 +257,10 @@ void bluetooth_task(void *parameters){
       Serial.println("Connection failed.");
 #endif
 
-  lora_config_f = loraConfig();
+#if ENHANCED_BEACON
+  lora_config_f = loraConfig();  // only if LoRa is enabled
+#endif
+
 
   TickType_t xLastWakeTime;
   const TickType_t xFrequency = pdMS_TO_TICKS(PERIOD_MS); // Convert PERIOD_MS to ticks
@@ -272,6 +278,7 @@ void bluetooth_task(void *parameters){
 
     state==LoRa ? digitalWrite(STATE_LED, 1) : digitalWrite(STATE_LED, 0);
     bool bluetooth_pin = digitalRead(BLUETOOTH_PIN);
+    digitalWrite(BL_LED, 0);
 
     switch (state){
     case LoRa:
@@ -289,43 +296,51 @@ void bluetooth_task(void *parameters){
 
       if((!bl_connected_f)){
         bl_scan_f = 1;
+#if ENHANCED_BEACON
         lora_ret = loraReceiveAndForward();
         if(lora_ret){
           digitalWrite(LORA_LED, 1);
           vTaskDelay(pdMS_TO_TICKS(5)); // To see the blink
           digitalWrite(LORA_LED, 0);
         }
+#endif
         next_state = LoRa;
         break;
       }
-
       break;
 
     case Bluetooth:
+
+      #if ENHANCED_BEACON
       if(!bluetooth_pin){
         pClient->disconnect();
         lora_config_f = loraConfig();
         next_state = LoRa;
         break;
       }
+      #endif
 
-      if(bl_connected_f && bl_notify_f){
+      if(bl_connected_f){
+        if(bl_notify_f){
           bl_notify_f = false;
           digitalWrite(BL_LED, 1);
           sendJSON();
           digitalWrite(BL_LED, 0);
-          next_state = Bluetooth;
-          break;
+        }
+        next_state = Bluetooth;
+        break;
       }
 
       if(!bl_connected_f){
+        #if ENHANCED_BEACON
         lora_config_f = loraConfig();
+        #endif
         next_state = LoRa;
+        break;
       }
-      break;
 
     default:
-      next_state = LoRa;
+      next_state = ENHANCED_BEACON ? LoRa : Bluetooth;
       break;
     }
 
@@ -374,7 +389,9 @@ float readBattPercentage(){
     uint8_t lsb = Wire.read();
     uint16_t percentage_raw = ((uint16_t)msb << 8) | lsb;
     //   voltage_raw >>= 4; // lower 4 bits are not used
-    return percentage_raw * 0.00390635; // each bit = 1.25 mV
+    float ret = percentage_raw * 0.00390635;
+    if (ret > 100.0) ret = 100;
+    return ret; // each bit = 1.25 mV
   }
   return -1.0; // error
 }
@@ -401,6 +418,8 @@ bool blRead(){
 bool sendJSON(){
   my_battV = readBattVoltage(); 
   my_battP = readBattPercentage();
+  rssi = pClient->getRssi();
+
   IPAddress iotIP;
   if (WiFi.hostByName("iot.local", iotIP)){
 
@@ -428,6 +447,8 @@ bool sendJSON(){
       udp.endPacket();
     }
     catch (const std::exception &e){
+      Serial.println("unable to send");
+      connectWiFi();
       return 1;
     }
 
@@ -449,14 +470,18 @@ bool loraConfig() {
     Serial.println("LoRa init failed!");
     return false;
   }
+  vTaskDelay(pdMS_TO_TICKS(50));
+  rf95.setFrequency(915.0);
+  vTaskDelay(pdMS_TO_TICKS(50));
+  rf95.setTxPower(20, false);         // High power mode
+  vTaskDelay(pdMS_TO_TICKS(50));
+  rf95.setSignalBandwidth(62500);  // Narrow bandwidth
+  vTaskDelay(pdMS_TO_TICKS(50));
+  rf95.setSpreadingFactor(12);       // Max spreading
+  vTaskDelay(pdMS_TO_TICKS(50));
+  rf95.setCodingRate4(8);            // Max redundancy
+  // vTaskDelay(pdMS_TO_TICKS(50));
 
-  if (!rf95.setFrequency(RF95_FREQ)) {
-    Serial.println("LoRa frequency setup failed!");
-    return false;
-  }
-
-  rf95.setTxPower(14, false); // 14 dBm, useRFO = false
-  Serial.println("LoRa config OK");
   return true;
 }
 
@@ -473,23 +498,73 @@ bool loraReceiveAndForward() {
     }
 
     if (ret) {
-        loraPacket[len] = '\0';
-        Serial.println("LoRa forward (latest packet):");
-        Serial.println(loraPacket);
+        loraPacket[len] = '\0'; // Null-terminate
+
+        // Parse the received JSON
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, loraPacket);
+
+        if (error) {
+            Serial.print("JSON parse error: ");
+            Serial.println(error.c_str());
+            return ret;
+        }
+
+        // Read battery info from this device
+        float myBattV = readBattVoltage();
+        float myBattP = readBattPercentage();
+
+        // Inject own battery values
+        doc["mbv"] = String(myBattV);
+        doc["mbp"] = String(myBattP);
+
+        // Serialize new JSON
+        String updatedJson;
+        serializeJson(doc, updatedJson);
 
         IPAddress iotIP;
         if (WiFi.hostByName("iot.local", iotIP)) {
             udp.beginPacket(iotIP, localPort);
-            udp.print(loraPacket);
+            udp.print(updatedJson);
             udp.endPacket();
-            return true;
+
+#if UART_TRACES
+            Serial.println("Forwarded LoRa with battery:");
+            Serial.println(updatedJson);
+#endif
+            return ret;
         } else {
             Serial.println("Failed to resolve iot.local");
-            return false;
+            connectWiFi();
+            return ret;
         }
     }
-    return false;
+    return ret;
 }
+
+bool connectWiFi() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi disconnected. Attempting reconnect...");
+
+    WiFi.disconnect();
+    vTaskDelay(pdMS_TO_TICKS(50));
+    WiFi.begin(ssid, password);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    for (size_t i = 0; i < 20; i++){
+      if(WiFi.status() != WL_CONNECTED)
+        break;
+      vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      return true;
+    } 
+    return false;
+  }
+  return true;
+}
+
 
 
 void loop(){

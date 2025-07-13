@@ -3,6 +3,8 @@
 
 // Core Arduino
 #include <Arduino.h>
+#include <ArduinoJson.h>
+
 
 // BLE libraries
 #include <BLEDevice.h>
@@ -52,5 +54,7 @@ bool sendJSON();
 
 bool loraConfig();
 bool loraReceiveAndForward();
+
+bool connectWiFi();
 
 #endif // MAIN_H

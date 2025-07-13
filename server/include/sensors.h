@@ -40,6 +40,7 @@
 #define RFM95_INT 14     // DIO0 (interrupt)
 
 
+
 // BLE Service and Characteristic
 extern BLEService* applicationService;
 // extern BLEService* heartRateService;
@@ -47,11 +48,8 @@ extern BLEService* applicationService;
 
 extern BLECharacteristic* temperatureCharacteristic;
 extern BLECharacteristic* heartRateCharacteristic;
-extern BLECharacteristic* accXCharacteristic;
-extern BLECharacteristic* accYCharacteristic;
-extern BLECharacteristic* accZCharacteristic;
-extern BLECharacteristic* battVCharacteristic;
-extern BLECharacteristic* battPCharacteristic;
+extern BLECharacteristic* accCharacteristic;
+extern BLECharacteristic* battCharacteristic;
 
 extern bool bl_connected_f;
 
@@ -95,7 +93,9 @@ void task_gps(void *parameters);
 float readBattVoltage();
 float readBattPercentage();
 void errorGPS();
+bool gpsConfig();
 bool loraConfig();
+bool loraDeactivate();
 bool sendLoraPacket();
 
 // -----------------------------------------------------------------------------

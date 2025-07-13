@@ -9,24 +9,32 @@ BLEService* applicationService;
 
 BLECharacteristic* temperatureCharacteristic;
 BLECharacteristic* heartRateCharacteristic;
-BLECharacteristic* accXCharacteristic;
-BLECharacteristic* accYCharacteristic;
-BLECharacteristic* accZCharacteristic;
-BLECharacteristic* battVCharacteristic;
-BLECharacteristic* battPCharacteristic;
+BLECharacteristic* accCharacteristic;
+BLECharacteristic* battCharacteristic;
 
 bool bl_connected_f = false;
 int counter = 0;
 
 class MyServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* pServer){
+        std::map<uint16_t, conn_status_t> peers = pServer->getPeerDevices(false);
+        Serial.print("Number of Peer devices: ");
+        Serial.println(peers.size());
         bl_connected_f = true;
         delay(10);
         pAdvertising->start();
     }
 
     void onDisconnect(BLEServer* pServer){
-        bl_connected_f = false;
+        // Get the current peer devices map
+        std::map<uint16_t, conn_status_t> peers = pServer->getPeerDevices(false);
+        Serial.print("Number of Peer devices: ");
+        Serial.println(peers.size());
+        // Only set bl_connected_f to false if NO devices are connected
+        if(peers.size() <= 1){
+            bl_connected_f = false;
+        }
+        
         // Optional: restart advertising so others can connect
         pAdvertising->start();
     }
@@ -50,6 +58,9 @@ void setup() {
 
     // Initialize BLE
     BLEDevice::init(DEVICE_NAME);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_N12); // for advertisements
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_CONN_HDL0, ESP_PWR_LVL_N12); // per connection handle (if needed)
+
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks()); 
     pAdvertising = BLEDevice::getAdvertising();
@@ -61,48 +72,32 @@ void setup() {
     // Create and set up temperature characteristic with descriptor
     temperatureCharacteristic = applicationService->createCharacteristic(
         TEMPERATURE_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ
+        BLECharacteristic::PROPERTY_NOTIFY
     );
-    
+
     heartRateCharacteristic = applicationService->createCharacteristic(
         HEARTRATE_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ
-    );
-    
-    accXCharacteristic = applicationService->createCharacteristic(
-        ACCX_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ
-    );
-    
-    accYCharacteristic = applicationService->createCharacteristic(
-        ACCY_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ
-    );
-    
-    accZCharacteristic = applicationService->createCharacteristic(
-        ACCZ_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ
+        BLECharacteristic::PROPERTY_NOTIFY
     );
 
-    battVCharacteristic = applicationService->createCharacteristic(
-        BATTV_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ
+    accCharacteristic = applicationService->createCharacteristic(
+        ACC_CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_NOTIFY
     );
 
-    battPCharacteristic = applicationService->createCharacteristic(
-        BATTP_CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ
+    battCharacteristic = applicationService->createCharacteristic(
+        BATT_CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_NOTIFY
     );
+
+
 
 
 
     temperatureCharacteristic->setValue("INITIALSTRING");
     heartRateCharacteristic->setValue("INITIALSTRING");
-    accXCharacteristic->setValue("INITIALSTRING");
-    accYCharacteristic->setValue("INITIALSTRING");
-    accZCharacteristic->setValue("INITIALSTRING");
-    battVCharacteristic->setValue("INITIALSTRING");
-    battPCharacteristic->setValue("INITIALSTRING");
+    accCharacteristic->setValue("INITIALSTRING");
+    battCharacteristic->setValue("INITIALSTRING");
 
     // Start the service
     applicationService->start();
