@@ -94,9 +94,10 @@ float readBattVoltage();
 float readBattPercentage();
 void errorGPS();
 bool gpsConfig();
-bool loraConfig();
+bool loraActivate();
 bool loraDeactivate();
 bool sendLoraPacket();
+bool bluetoothNotify();
 
 // -----------------------------------------------------------------------------
 // Optional Class Definition

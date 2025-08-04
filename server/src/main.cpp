@@ -21,7 +21,7 @@ class MyServerCallbacks : public BLEServerCallbacks {
         Serial.print("Number of Peer devices: ");
         Serial.println(peers.size());
         bl_connected_f = true;
-        delay(10);
+        vTaskDelay(pdMS_TO_TICKS(10));
         pAdvertising->start();
     }
 
@@ -58,8 +58,8 @@ void setup() {
 
     // Initialize BLE
     BLEDevice::init(DEVICE_NAME);
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_N12); // for advertisements
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_CONN_HDL0, ESP_PWR_LVL_N12); // per connection handle (if needed)
+    // esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_N12); // for advertisements
+    // esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_CONN_HDL0, ESP_PWR_LVL_N12); // per connection handle (if needed)
 
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks()); 
@@ -90,10 +90,6 @@ void setup() {
         BLECharacteristic::PROPERTY_NOTIFY
     );
 
-
-
-
-
     temperatureCharacteristic->setValue("INITIALSTRING");
     heartRateCharacteristic->setValue("INITIALSTRING");
     accCharacteristic->setValue("INITIALSTRING");
@@ -101,7 +97,6 @@ void setup() {
 
     // Start the service
     applicationService->start();
-
 
     // Add service to advertising
     pAdvertising->addServiceUUID(APPLICATION_SERVICE_UUID);

@@ -4,7 +4,7 @@
 #define GPSECHO 1
 #define GPSTASK 1
 
-#define OUTPUT_PERIOD 2000
+#define OUTPUT_PERIOD 1000
 
 #define TEMP_DELAY_MS 500
 #define TEMP_DELAY_TICKS (TEMP_DELAY_MS / portTICK_PERIOD_MS)
@@ -41,7 +41,7 @@ float pbatt = 0;
 // int8_t validHeartRate; //indicator to show if the heart rate calculation is valid
 
 
-bool lora_config_f = 0;
+bool lora_sucess_f = 0;
 bool enable_gps_lora_f = 0;
 
 // Output variables
@@ -173,14 +173,11 @@ void sensors_run(){
         NULL        // Task handler
     );
 #endif
-
 }
 
 void task_temperature(void *parameters){
     TickType_t xLastWakeTime = xTaskGetTickCount(); // Initialize time reference
-    while (1)
-    {
-
+    while (1){
         temperature_max = particleSensor.readTemperature();
         vTaskDelay(pdMS_TO_TICKS(1));
         vbatt = readBattVoltage();
@@ -191,8 +188,7 @@ void task_temperature(void *parameters){
 }
 
 void task_heartmonitor(void *parameters){
-    while (1)
-    {
+    while (1){
         irValue = particleSensor.getIR();
 
         if (irValue < 50000)
@@ -259,10 +255,8 @@ void task_accelerometer(void *parameters){
 
     BNO08x_RVC_Data heading;
 
-    while (1)
-    {
-        if (rvc.read(&heading))
-        {
+    while (1){
+        if (rvc.read(&heading)){
             acc_x = heading.x_accel;
             acc_y = heading.y_accel;
             acc_z = heading.z_accel;
@@ -276,7 +270,7 @@ void task_output(void *parameters){
     server_state_t state = LoRa;
     server_state_t next_state = LoRa;
 
-    lora_config_f = loraConfig();
+    lora_sucess_f = loraActivate();
 
     // Timers for periodic cycle of 
     TickType_t xLastWakeTime;
@@ -284,45 +278,25 @@ void task_output(void *parameters){
     xLastWakeTime = xTaskGetTickCount();
 
     while(1){
-        char temp_s[20], bpm_s[20], acc_s[20], batt_s[20];
-        // Write string messages in each variable
-        snprintf(temp_s, sizeof(temp_s), "%.2f", temperature_max);
-        snprintf(bpm_s, sizeof(bpm_s), "%d", beatAvg);
-        snprintf(acc_s, sizeof(acc_s), "%.2f;%.2f;%.2f", acc_x, acc_y, acc_z);
-        snprintf(batt_s, sizeof(batt_s), "%.2f;%.2f", vbatt, pbatt);
-
-        switch (state) {
-        case Bluetooth:
-            Serial.println("\n[STATE] BLUETOOTH");
-            break;
-        case LoRa:
-            Serial.println("\n[STATE] LORA");
-            break;
-        default:
-            Serial.println("\n[STATE] UNKNOWN");
-            break;
-        }
-
 
         switch (state){
         case LoRa:
-            if(!lora_config_f){
-                Serial.println("Config LoRa 1");
-                lora_config_f = loraConfig();
+            if(!lora_sucess_f){
+                Serial.println("STATE LORA - ACTIVATING LORA");
+                lora_sucess_f = loraActivate();
                 next_state = LoRa;
                 break;
             }
 
             if(bl_connected_f){
+                Serial.println("STATE LORA - CHANGE TO BLE");
                 loraDeactivate();
-                Serial.println("Change to Bluetooth 1");
                 next_state = Bluetooth;
             }
 
-            if(!bl_connected_f && lora_config_f){
-                digitalWrite(ACTIVITY_PIN, 1);
-                lora_config_f = sendLoraPacket();
-                digitalWrite(ACTIVITY_PIN, 0);
+            if(!bl_connected_f && lora_sucess_f){
+                Serial.println("STATE LORA - SENDING LORA PACKET");
+                lora_sucess_f = sendLoraPacket();
                 xLastWakeTime = xTaskGetTickCount();
                 next_state = LoRa;
                 break;
@@ -331,30 +305,23 @@ void task_output(void *parameters){
 
         case Bluetooth:
             if (!bl_connected_f){
-                lora_config_f = loraConfig();
+                Serial.println("STATE BLUETOOTH - ACTIVATING LORA");
+                lora_sucess_f = loraActivate();
                 next_state = LoRa;
-                Serial.println("Change to LoRa 1");
                 break;
             }
 
             if(bl_connected_f){
-                digitalWrite(ACTIVITY_PIN, HIGH);
-
-                temperatureCharacteristic->setValue(temp_s);
-                heartRateCharacteristic->setValue(bpm_s);
-                accCharacteristic->setValue(acc_s);
-                battCharacteristic->setValue(batt_s);
-                temperatureCharacteristic->notify();
-                heartRateCharacteristic->notify();
-                accCharacteristic->notify();
-                battCharacteristic->notify();
-                
+                Serial.println("STATE BLUETOOTH - SENDING BLE NOTIFY");
+                bluetoothNotify();
                 next_state = Bluetooth;
+                break;
             }
             break;
         
         default:
-            lora_config_f = loraConfig();
+            Serial.println("STATE UNKNOWN - ACTIVATING LORA");
+            lora_sucess_f = loraActivate();
             next_state = LoRa;
             break;
         }        
@@ -412,17 +379,19 @@ void task_output(void *parameters){
 #endif
 
         state = next_state;
-        digitalWrite(ACTIVITY_PIN, LOW);
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 
 void task_gps(void *parameters){
     
-
     int64_t time_us = esp_timer_get_time();
     
     while (1){
+        while(!enable_gps_lora_f){
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
         if (Serial2.available()){
             char c = gps.read();
 #if GPSECHO
@@ -517,8 +486,7 @@ void errorGPS(){
     vTaskDelay(pdMS_TO_TICKS(200));
 }
 
-bool loraConfig() {
-
+bool loraActivate() {
     digitalWrite(ENABLE_GPS_LORA_PIN, HIGH);
     vTaskDelay(pdMS_TO_TICKS(1500));
     if (!rf95.init()) {
@@ -534,11 +502,11 @@ bool loraConfig() {
     vTaskDelay(pdMS_TO_TICKS(50));
     rf95.setTxPower(20, false);         // High power mode
     vTaskDelay(pdMS_TO_TICKS(50));
-    rf95.setSignalBandwidth(62500);  // Narrow bandwidth
+    rf95.setSignalBandwidth(62500);     // Narrow bandwidth
     vTaskDelay(pdMS_TO_TICKS(50));
-    rf95.setSpreadingFactor(12);       // Max spreading
+    rf95.setSpreadingFactor(12);        // Max spreading
     vTaskDelay(pdMS_TO_TICKS(50));
-    rf95.setCodingRate4(8);            // Max redundancy
+    rf95.setCodingRate4(8);             // Max redundancy
     vTaskDelay(pdMS_TO_TICKS(50));
 
     gpsConfig();
@@ -549,6 +517,8 @@ bool loraConfig() {
 }
 
 bool sendLoraPacket() {
+    digitalWrite(ACTIVITY_PIN, 1);
+
     // Copy values from globals to local safe versions
     portENTER_CRITICAL(&gpsMux);
     bool fix = gps_fix;
@@ -576,7 +546,7 @@ bool sendLoraPacket() {
 
     // Construct JSON string
     String json = "{";
-    json += "\"id\":\"0\",";                 // id
+    // json += "\"id\":\"0\",";                 // id
     json += "\"wbv\":" + String(battV_s) + ",";   // wrist_battV → bv
     json += "\"wbp\":" + String(battP_s) + ",";   // wrist_battP → bp
     json += "\"g\":{";                           // gps → g
@@ -602,6 +572,7 @@ bool sendLoraPacket() {
     Serial.println(json);
 #endif
 
+    digitalWrite(ACTIVITY_PIN, 0);
     return sent;
 }
 
@@ -628,8 +599,31 @@ bool gpsConfig(){
 
 bool loraDeactivate(){
     enable_gps_lora_f = 0;
-    vTaskDelay(pdMS_TO_TICKS(200));
+    vTaskDelay(pdMS_TO_TICKS(100));
     digitalWrite(ENABLE_GPS_LORA_PIN, LOW);
     digitalWrite(GPS_LED_PIN, LOW);
     return 0;
+}
+
+bool bluetoothNotify(){
+    digitalWrite(ACTIVITY_PIN, HIGH);
+
+    char temp_s[20], bpm_s[20], acc_s[20], batt_s[20];
+    // Write string messages in each variable
+    snprintf(temp_s, sizeof(temp_s), "%.2f", temperature_max);
+    snprintf(bpm_s, sizeof(bpm_s), "%d", beatAvg);
+    snprintf(acc_s, sizeof(acc_s), "%.2f;%.2f;%.2f", acc_x, acc_y, acc_z);
+    snprintf(batt_s, sizeof(batt_s), "%.2f;%.2f", vbatt, pbatt);
+
+    temperatureCharacteristic->setValue(temp_s);
+    heartRateCharacteristic->setValue(bpm_s);
+    accCharacteristic->setValue(acc_s);
+    battCharacteristic->setValue(batt_s);
+    temperatureCharacteristic->notify();
+    heartRateCharacteristic->notify();
+    accCharacteristic->notify();
+    battCharacteristic->notify();
+
+    digitalWrite(ACTIVITY_PIN, LOW);
+    return true;
 }
