@@ -15,7 +15,14 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:padding="16dp"
-        android:text="Waiting for data..." />
+        android:textSize="16sp"
+        android:linksClickable="true"
+        android:autoLink="none"
+        android:textColorLink="@android:color/holo_blue_dark"
+        />
+
+
+
 
 
 </LinearLayout>
