@@ -18,6 +18,7 @@
 // WiFi and UDP
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <ESPmDNS.h>
 
 #include "esp_timer.h"
 
@@ -43,16 +44,17 @@
 
 // ==== Function Declarations ====
 
-void bluetooth_task(void *parameters);
+void task_forward(void *parameters);
 void scan_task(void *parameters);
+void update_ip_task(void *parameters);
 
 float readBattVoltage();     // Reads battery voltage from MAX17048
 float readBattPercentage();  // Reads battery % (state of charge) from MAX17048
 
 bool blRead();
-bool sendJSON();
+bool blReceiveAndForward();
 
-bool loraConfig();
+bool loraActivate();
 bool loraReceiveAndForward();
 
 bool connectWiFi();

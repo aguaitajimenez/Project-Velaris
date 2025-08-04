@@ -35,6 +35,8 @@ BLERemoteCharacteristic *hrChar;
 BLERemoteCharacteristic *accChar;
 BLERemoteCharacteristic *battChar;
 
+IPAddress iotIP = IPAddress();
+
 
 typedef enum{
   Bluetooth,
@@ -137,6 +139,7 @@ bool connectToServer(){
   if (!pClient->connect(myDevice))
   {
     Serial.println("Failed to connect.");
+    bl_connected_f = false;
     return false;
   }
 
@@ -145,6 +148,7 @@ bool connectToServer(){
   {
     Serial.println("Failed to find service.");
     pClient->disconnect();
+    bl_connected_f = false;
     return false;
   }
 
@@ -167,7 +171,6 @@ bool connectToServer(){
 class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks{
   void onResult(BLEAdvertisedDevice advertisedDevice) override{
     
-
     if (advertisedDevice.haveName() && advertisedDevice.getName() == SERVER_NAME){
       Serial.print("Device found: ");
       Serial.print(advertisedDevice.getAddress().toString().c_str());
@@ -190,11 +193,12 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks{
 WiFiUDP udp;
 char packetBuffer[256];
 unsigned int localPort = 8000;
-const char *ssid = "WhiteSky-Ion";
-const char *password = "32889754";
+const char *ssid = "debug";
+const char *password = "projectvelaris";
 
 void setup()
 {
+  delay(5000);
 
   Serial.begin(5000000);
   // Configure GPIO18 as input with internal pull-up
@@ -207,6 +211,8 @@ void setup()
     delay(100);
     Serial.print(F("."));
   }
+  // WiFi.config(WiFi.localIP(), WiFi.gatewayIP(), WiFi.subnetMask(), WiFi.gatewayIP());
+
   udp.begin(localPort);
   Serial.printf("UDP Client : %s:%i \n", WiFi.localIP().toString().c_str(), localPort);
 
@@ -229,11 +235,11 @@ void setup()
   pScan->setActiveScan(true);
   
   xTaskCreate(
-      bluetooth_task,
-      "bluetooth_task", // Task name
+      task_forward,
+      "task_forward", // Task name
       20480,            // stack size
       NULL,             // Task parameters
-      2,                // Task priority
+      3,                // Task priority
       NULL              // Task handler
   );
 
@@ -245,22 +251,16 @@ void setup()
       1,                // Task priority
       NULL              // Task handler
   );
+
 }
 
-void bluetooth_task(void *parameters){
+void task_forward(void *parameters){
 
-  client_state_t next_state = LoRa;
-  bool lora_ret = 0;
-
-  #if UART_TRACES
-      bl_connected_f ? Serial.println("Connected to notifications.") :
-      Serial.println("Connection failed.");
-#endif
+  client_state_t next_state = ENHANCED_BEACON ? LoRa : Bluetooth;
 
 #if ENHANCED_BEACON
-  lora_config_f = loraConfig();  // only if LoRa is enabled
+  lora_config_f = loraActivate();  // only if LoRa is enabled
 #endif
-
 
   TickType_t xLastWakeTime;
   const TickType_t xFrequency = pdMS_TO_TICKS(PERIOD_MS); // Convert PERIOD_MS to ticks
@@ -272,74 +272,80 @@ void bluetooth_task(void *parameters){
     // State function
     // **************
 
-    #if UART_TRACES
-    state==LoRa ? Serial.println("Lora State") :  Serial.println("Bluetooth State");
-    #endif
-
     state==LoRa ? digitalWrite(STATE_LED, 1) : digitalWrite(STATE_LED, 0);
     bool bluetooth_pin = digitalRead(BLUETOOTH_PIN);
-    digitalWrite(BL_LED, 0);
 
     switch (state){
+#if ENHANCED_BEACON
     case LoRa:
       if(bl_connected_f){
+        Serial.println("STATE LORA - ACTIVATING BLE");
         next_state = Bluetooth;
         break;
       }
 
       if(bl_detected_f && bluetooth_pin){
+        Serial.println("STATE LORA - CONNECTING BLE");
         bl_detected_f = 0;
-        bl_connected_f = connectToServer();
+        connectToServer();
         next_state = LoRa;
         break;
       }
 
       if((!bl_connected_f)){
+        Serial.println("STATE LORA - FORWARDING SERVER");
         bl_scan_f = 1;
-#if ENHANCED_BEACON
-        lora_ret = loraReceiveAndForward();
-        if(lora_ret){
-          digitalWrite(LORA_LED, 1);
-          vTaskDelay(pdMS_TO_TICKS(5)); // To see the blink
-          digitalWrite(LORA_LED, 0);
-        }
-#endif
+        loraReceiveAndForward();
         next_state = LoRa;
         break;
       }
       break;
+#endif
+
 
     case Bluetooth:
-
-      #if ENHANCED_BEACON
+#if ENHANCED_BEACON
       if(!bluetooth_pin){
+        Serial.println("STATE BLUETOOTH - PIN DETECTED, DEACTIVATING BLE");
         pClient->disconnect();
-        lora_config_f = loraConfig();
+        lora_config_f = loraActivate();
         next_state = LoRa;
         break;
       }
-      #endif
-
-      if(bl_connected_f){
-        if(bl_notify_f){
-          bl_notify_f = false;
-          digitalWrite(BL_LED, 1);
-          sendJSON();
-          digitalWrite(BL_LED, 0);
-        }
+      if(!bl_connected_f){
+        Serial.println("STATE BLUETOOTH - BLE DISCONNECTED");
+        lora_config_f = loraActivate();
+        next_state = LoRa;
+        break;
+      }
+#else
+      if(bl_detected_f){
+        Serial.println("STATE BLUETOOTH - BLE DETECTED");
+        bl_detected_f = 0;
+        connectToServer();
         next_state = Bluetooth;
         break;
       }
-
       if(!bl_connected_f){
-        #if ENHANCED_BEACON
-        lora_config_f = loraConfig();
-        #endif
-        next_state = LoRa;
+        Serial.println("STATE BLUETOOTH - BLE DISCONNECTED, SCANNING...");
+        bl_scan_f = 1;
+        next_state = Bluetooth;
         break;
       }
+#endif
+
+      if(bl_connected_f && bl_notify_f){
+        Serial.println("STATE BLUETOOTH - FORWARDING SERVER");
+        bl_notify_f = 0;
+        blReceiveAndForward();
+        next_state = Bluetooth;
+        break;  
+      }
+
+      break;
 
     default:
+      Serial.println("STATE UNKNOWN");
       next_state = ENHANCED_BEACON ? LoRa : Bluetooth;
       break;
     }
@@ -359,6 +365,8 @@ void scan_task(void *parameters){
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
+
+
 
 
 float readBattVoltage(){
@@ -415,14 +423,20 @@ bool blRead(){
   return 0;
 }
 
-bool sendJSON(){
+bool blReceiveAndForward(){
+  digitalWrite(BL_LED, 1);
   my_battV = readBattVoltage(); 
   my_battP = readBattPercentage();
   rssi = pClient->getRssi();
+    
+  bool resolved = WiFi.hostByName("iot.local", iotIP);
 
-  IPAddress iotIP;
-  if (WiFi.hostByName("iot.local", iotIP)){
+  if (!resolved || iotIP.toString() == "0.0.0.0") {
+    Serial.println("iot.local failed, trying iot...");
+    resolved = WiFi.hostByName("iot", iotIP);
+  }
 
+  if (WiFi.status() == WL_CONNECTED && resolved){
     String json = "{";
     json += "\"id\":\"" + String(device_id) + "\",";  // id
     json += "\"rs\":" + String(rssi) + ",";           // rssi → rs
@@ -441,14 +455,13 @@ bool sendJSON(){
 
     // Serial.print("Payload: ");
     // Serial.println(json);
-    try{
-      udp.beginPacket(iotIP, localPort);
+    if(udp.beginPacket(iotIP, localPort)){
       udp.print(json);
       udp.endPacket();
-    }
-    catch (const std::exception &e){
+    } else {
       Serial.println("unable to send");
       connectWiFi();
+      digitalWrite(BL_LED, 0);
       return 1;
     }
 
@@ -456,16 +469,17 @@ bool sendJSON(){
     Serial.print("Payload:");
     Serial.println(json);
 #endif
-
   }
   else{
+    digitalWrite(BL_LED, 0);
     return 1;
   }
+  digitalWrite(BL_LED, 0);
   return 0;
 }
 
 
-bool loraConfig() {
+bool loraActivate() {
   if (!rf95.init()) {
     Serial.println("LoRa init failed!");
     return false;
@@ -515,27 +529,39 @@ bool loraReceiveAndForward() {
         float myBattP = readBattPercentage();
 
         // Inject own battery values
+        doc["id"] = device_id;
         doc["mbv"] = String(myBattV);
         doc["mbp"] = String(myBattP);
 
         // Serialize new JSON
         String updatedJson;
         serializeJson(doc, updatedJson);
+        bool resolved = WiFi.hostByName("iot.local", iotIP);
 
-        IPAddress iotIP;
-        if (WiFi.hostByName("iot.local", iotIP)) {
+        if (!resolved || iotIP.toString() == "0.0.0.0") {
+          Serial.println("iot.local failed, trying iot...");
+          resolved = WiFi.hostByName("iot", iotIP);
+        }
+
+        if (WiFi.status() == WL_CONNECTED && resolved){
             udp.beginPacket(iotIP, localPort);
             udp.print(updatedJson);
             udp.endPacket();
 
 #if UART_TRACES
-            Serial.println("Forwarded LoRa with battery:");
-            Serial.println(updatedJson);
+            Serial.println("Forwarded LoRa with battery:"); Serial.println(updatedJson);
 #endif
+
+            digitalWrite(LORA_LED, 1);
+            vTaskDelay(pdMS_TO_TICKS(200)); // To see the blink
+            digitalWrite(LORA_LED, 0);
             return ret;
         } else {
-            Serial.println("Failed to resolve iot.local");
+
             connectWiFi();
+            digitalWrite(LORA_LED, 1);
+            vTaskDelay(pdMS_TO_TICKS(20)); // To see the blink
+            digitalWrite(LORA_LED, 0);
             return ret;
         }
     }
@@ -551,15 +577,15 @@ bool connectWiFi() {
     WiFi.begin(ssid, password);
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    for (size_t i = 0; i < 20; i++){
-      if(WiFi.status() != WL_CONNECTED)
-        break;
+    for (size_t i = 0; i < 50; i++){
+      if(WiFi.status() == WL_CONNECTED){
+        Serial.println("Wifi Connected");
+        return true;
+      }
+      Serial.print(".");
       vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-      return true;
-    } 
     return false;
   }
   return true;
